@@ -1,0 +1,3 @@
+import {defineConfig} from '@playwright/test';
+const database=process.env.ASPIRE_TEST_DATABASE ||= `aspire_test_${Date.now()}`;
+export default defineConfig({testDir:'./tests',workers:1,timeout:60000,use:{baseURL:'http://127.0.0.1:4001',viewport:{width:1440,height:1000},launchOptions:{channel:'msedge',args:['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream']}},webServer:{command:'node server/index.js',url:'http://127.0.0.1:4001/api/health',timeout:60000,env:{PORT:'4001',MONGODB_URI:`mongodb://127.0.0.1:27017/${database}?replicaSet=aspire-rs`,JWT_SECRET:'test-only-secret-isolated-database-123456789'}},metadata:{database}});
