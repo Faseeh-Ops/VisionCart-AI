@@ -1,0 +1,24 @@
+[
+  {
+    "key": "mehmood",
+    "expected": "8697449918281",
+    "price": 250,
+    "barcode": "8697449918281",
+    "matched": true
+  },
+  {
+    "key": "innovita",
+    "expected": "8965310043173",
+    "price": 10,
+    "barcode": "8965310043173",
+    "matched": true
+  },
+  {
+    "key": "tiger",
+    "expected": "8961003694271",
+    "price": 10,
+    "barcode": null,
+    "error": "Barcode could not be decoded. Try a sharp photo without glare, or enter the printed number.",
+    "matched": false
+  }
+]
