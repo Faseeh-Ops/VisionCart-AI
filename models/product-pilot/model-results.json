@@ -1,0 +1,185 @@
+{
+  "method": "Full supplied front images ranked against five hand-written descriptions. Raw logits are not confidence percentages. No independent photos or training.",
+  "products": [
+    {
+      "key": "mehmood",
+      "name": "Mahmood Cappuccino Classic coffee 25 g",
+      "price": 250,
+      "barcode": "8697449918281",
+      "yolo_detections": [
+        {
+          "class": "keyboard",
+          "score": 0.7716087698936462,
+          "xyxy": [
+            410.97027587890625,
+            0.569061279296875,
+            958.5170288085938,
+            313.007080078125
+          ]
+        },
+        {
+          "class": "person",
+          "score": 0.7058385014533997,
+          "xyxy": [
+            1.09844970703125,
+            81.287841796875,
+            307.69659423828125,
+            1128.418701171875
+          ]
+        },
+        {
+          "class": "person",
+          "score": 0.4400927424430847,
+          "xyxy": [
+            0.0,
+            80.0478515625,
+            857.244384765625,
+            1180.808349609375
+          ]
+        }
+      ],
+      "siglip_text_ranking": [
+        {
+          "description": "A photo of a Mahmood Cappuccino Classic instant coffee sachet with black orange white and green packaging.",
+          "raw_logit": 6.354393005371094
+        },
+        {
+          "description": "A photo of LU Tiger biscuits in a red and yellow packet.",
+          "raw_logit": -6.576399803161621
+        },
+        {
+          "description": "A photo of Innovative Choc n Chip chocolate chip cookies in a blue biscuit packet.",
+          "raw_logit": -7.030919075012207
+        },
+        {
+          "description": "A photo of a computer keyboard.",
+          "raw_logit": -13.353347778320312
+        },
+        {
+          "description": "A photo of an empty wooden desk.",
+          "raw_logit": -14.075322151184082
+        }
+      ]
+    },
+    {
+      "key": "innovita",
+      "name": "Innovative Choc n Chip biscuits",
+      "price": 10,
+      "barcode": "8965310043173",
+      "yolo_detections": [
+        {
+          "class": "person",
+          "score": 0.7020983695983887,
+          "xyxy": [
+            0.1014404296875,
+            5.770263671875,
+            960.0,
+            1242.002197265625
+          ]
+        },
+        {
+          "class": "donut",
+          "score": 0.27951177954673767,
+          "xyxy": [
+            301.8629150390625,
+            752.4217529296875,
+            675.8331298828125,
+            1102.8636474609375
+          ]
+        },
+        {
+          "class": "keyboard",
+          "score": 0.25984692573547363,
+          "xyxy": [
+            724.177490234375,
+            155.922607421875,
+            960.0,
+            1196.460693359375
+          ]
+        }
+      ],
+      "siglip_text_ranking": [
+        {
+          "description": "A photo of Innovative Choc n Chip chocolate chip cookies in a blue biscuit packet.",
+          "raw_logit": 2.7825355529785156
+        },
+        {
+          "description": "A photo of LU Tiger biscuits in a red and yellow packet.",
+          "raw_logit": -11.874818801879883
+        },
+        {
+          "description": "A photo of a Mahmood Cappuccino Classic instant coffee sachet with black orange white and green packaging.",
+          "raw_logit": -12.691951751708984
+        },
+        {
+          "description": "A photo of a computer keyboard.",
+          "raw_logit": -14.467846870422363
+        },
+        {
+          "description": "A photo of an empty wooden desk.",
+          "raw_logit": -19.156330108642578
+        }
+      ]
+    },
+    {
+      "key": "tiger",
+      "name": "LU Tiger biscuits",
+      "price": 10,
+      "barcode": "8961003694271",
+      "yolo_detections": [
+        {
+          "class": "person",
+          "score": 0.828650176525116,
+          "xyxy": [
+            0.0,
+            0.938720703125,
+            835.6978759765625,
+            1257.393310546875
+          ]
+        },
+        {
+          "class": "tie",
+          "score": 0.4619844853878021,
+          "xyxy": [
+            280.07171630859375,
+            20.6802978515625,
+            730.866943359375,
+            1255.7554931640625
+          ]
+        },
+        {
+          "class": "keyboard",
+          "score": 0.2792375087738037,
+          "xyxy": [
+            797.73486328125,
+            397.5605773925781,
+            959.6304931640625,
+            1280.0
+          ]
+        }
+      ],
+      "siglip_text_ranking": [
+        {
+          "description": "A photo of LU Tiger biscuits in a red and yellow packet.",
+          "raw_logit": -1.9886445999145508
+        },
+        {
+          "description": "A photo of Innovative Choc n Chip chocolate chip cookies in a blue biscuit packet.",
+          "raw_logit": -3.424478530883789
+        },
+        {
+          "description": "A photo of a computer keyboard.",
+          "raw_logit": -14.750941276550293
+        },
+        {
+          "description": "A photo of a Mahmood Cappuccino Classic instant coffee sachet with black orange white and green packaging.",
+          "raw_logit": -15.732156753540039
+        },
+        {
+          "description": "A photo of an empty wooden desk.",
+          "raw_logit": -16.827594757080078
+        }
+      ]
+    }
+  ]
+}
