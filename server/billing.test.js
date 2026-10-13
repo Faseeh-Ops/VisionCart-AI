@@ -1,0 +1,15 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {calculateInvoice} from './billing.js';
+import {dateRange} from './reports.js';
+import {validatePhoto} from './profile-photo.js';
+const products=[{_id:'one',name:'Milk',barcode:'123',price:2.55,stock:3,verified:true}];
+test('prices come from catalog and quantities merge',()=>assert.deepEqual(calculateInvoice([{productId:'one',quantity:1,price:0},{productId:'one',quantity:2}],products)[0].total,7.65));
+test('reject overselling',()=>assert.throws(()=>calculateInvoice([{productId:'one',quantity:4}],products),/stock/));
+test('reject unverified products',()=>assert.throws(()=>calculateInvoice([{productId:'one',quantity:1}],[{...products[0],verified:false}]),/verified/));
+test('reject invalid quantities',()=>assert.throws(()=>calculateInvoice([{productId:'one',quantity:-1}],products),/quantity/));
+test('discount comes from catalog with cent rounding and immutable snapshot',()=>{const line=calculateInvoice([{productId:'one',quantity:2,discountPercent:100}],[{...products[0],discountPercent:10}])[0];assert.equal(line.price,2.3);assert.equal(line.originalPrice,2.55);assert.equal(line.total,4.6);assert.equal(line.discountTotal,.5);});
+test('reject discounts outside allowed range',()=>assert.throws(()=>calculateInvoice([{productId:'one',quantity:1}],[{...products[0],discountPercent:101}]),/discount/));
+test('daily filters use Pakistan midnight and inclusive end day',()=>{const range=dateRange({from:'2026-10-09',to:'2026-10-09'}).createdAt;assert.equal(range.$gte.toISOString(),'2026-10-08T19:00:00.000Z');assert.equal(range.$lt.toISOString(),'2026-10-09T19:00:00.000Z');});
+test('reject invalid dates and reversed ranges',()=>{assert.throws(()=>dateRange({from:'2026-02-30'}),/date/);assert.throws(()=>dateRange({from:'2026-10-10',to:'2026-10-09'}),/End date/);});
+test('profile photos reject active formats, fake images, and oversized content; removal is allowed',()=>{assert.equal(validatePhoto(null),null);assert.throws(()=>validatePhoto('data:image/svg+xml;base64,PHN2Zz4='),/JPEG/);assert.throws(()=>validatePhoto('data:image/png;base64,'+Buffer.alloc(20).toString('base64')),/format/);assert.throws(()=>validatePhoto('data:image/png;base64,'+Buffer.alloc(300000).toString('base64')),/256 KB/);});
