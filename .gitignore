@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+*.log
+test-results/
+playwright-report/
+models/detector/
+models/siglip2/
+models/qwen/
+models/product-pilot/.ultralytics/
+.venv-ai/
+.tools/
+__pycache__/
+*.pyc
