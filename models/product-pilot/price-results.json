@@ -1,0 +1,42 @@
+{
+  "note": "In-memory test only. No database writes, real stock changes or invoice creation.",
+  "items": [
+    {
+      "productId": "mehmood",
+      "name": "Mahmood Cappuccino Classic coffee 25 g",
+      "barcode": "8697449918281",
+      "price": 250,
+      "originalPrice": 250,
+      "discountPercent": 0,
+      "discountPerUnit": 0,
+      "quantity": 1,
+      "total": 250,
+      "discountTotal": 0
+    },
+    {
+      "productId": "innovita",
+      "name": "Innovative Choc n Chip biscuits",
+      "barcode": "8965310043173",
+      "price": 10,
+      "originalPrice": 10,
+      "discountPercent": 0,
+      "discountPerUnit": 0,
+      "quantity": 1,
+      "total": 10,
+      "discountTotal": 0
+    },
+    {
+      "productId": "tiger",
+      "name": "LU Tiger biscuits",
+      "barcode": "8961003694271",
+      "price": 10,
+      "originalPrice": 10,
+      "discountPercent": 0,
+      "discountPerUnit": 0,
+      "quantity": 1,
+      "total": 10,
+      "discountTotal": 0
+    }
+  ],
+  "total": 270
+}
