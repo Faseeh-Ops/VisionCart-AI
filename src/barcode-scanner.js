@@ -8,8 +8,28 @@ export function createBarcodeReader() {
   return new BrowserMultiFormatReader(hints,{delayBetweenScanAttempts:120,delayBetweenScanSuccess:400});
 }
 
-export function cameraConstraints(deviceId) {
-  return {audio:false,video:{...(deviceId?{deviceId:{exact:deviceId}}:{facingMode:{ideal:'environment'}}),width:{ideal:1920},height:{ideal:1080}}};
+export function cameraConstraints(deviceId,devices=[]) {
+  const virtual=/droidcam|iriun|virtual|obs|camo/i.test(devices.find(d=>d.deviceId===deviceId)?.label||'');
+  // Virtual drivers negotiate their own pixel format and resolution. Forcing
+  // HD capture can produce invalid frames on some phone-webcam drivers.
+  return {audio:false,video:{...(deviceId?{deviceId:{exact:deviceId}}:{facingMode:{ideal:'environment'}}),...(!virtual?{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}:{})}};
+}
+
+export function watchCameraFrames(video,onProblem) {
+  const canvas=document.createElement('canvas');canvas.width=32;canvas.height=24;
+  let greenFrames=0,reported=false;
+  const timer=setInterval(()=>{
+    if(video.readyState<2||!video.videoWidth)return;
+    try {
+      const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(video,0,0,32,24);
+      const pixels=ctx.getImageData(0,0,32,24).data;
+      let green=0;
+      for(let i=0;i<pixels.length;i+=4)if(pixels[i+1]>35&&pixels[i+1]>pixels[i]*2+15&&pixels[i+1]>pixels[i+2]*2+15)green++;
+      greenFrames=green>32*24*.98?greenFrames+1:0;
+      if(greenFrames>=3&&!reported){reported=true;onProblem('The selected camera is sending solid green frames. Check the DroidCam Windows preview, reconnect the phone, then restart the camera. If that preview works, try disabling browser graphics acceleration and restarting the browser.');}
+    } catch {}
+  },1500);
+  return()=>clearInterval(timer);
 }
 
 
