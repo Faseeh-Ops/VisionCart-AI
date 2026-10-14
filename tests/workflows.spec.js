@@ -3,6 +3,19 @@ import mongoose from 'mongoose';
 import config from '../playwright.config.js';
 import {barcodeImage} from './barcode-fixture.js';
 import bcrypt from 'bcryptjs';
+
+async function provisionCashier(request,adminHeaders,name,email) {
+ const created=await request.post('/api/users/cashiers',{headers:adminHeaders,data:{name,email,password:'Temporary123!'}});expect(created.status()).toBe(201);
+ const temporary=await (await request.post('/api/auth/login',{data:{email,password:'Temporary123!',role:'cashier'}})).json();expect(temporary.user.mustChangePassword).toBe(true);
+ const headers={Authorization:`Bearer ${temporary.token}`};
+ expect((await request.get('/api/products',{headers})).status()).toBe(403);
+ expect((await request.post('/api/auth/change-password',{headers,data:{currentPassword:'Temporary123!',newPassword:'Temporary123!'}})).status()).toBe(400);
+ const changed=await request.post('/api/auth/change-password',{headers,data:{currentPassword:'Temporary123!',newPassword:'TestPassword123!'}});expect(changed.ok()).toBeTruthy();
+ expect((await request.get('/api/products',{headers})).status()).toBe(401);
+ expect((await request.post('/api/auth/login',{data:{email,password:'Temporary123!'}})).status()).toBe(401);
+ const account=await changed.json();expect(account.user.mustChangePassword).toBe(false);return account;
+}
+
 test('camera discovery, external preference and device disconnection',async({page})=>{
   await page.addInitScript(()=>{
     window.testCameras=[{kind:'videoinput',deviceId:'built-in',label:'Integrated Camera'},{kind:'videoinput',deviceId:'usb-logitech',label:'Logitech C130 USB Webcam'}];
@@ -112,8 +125,8 @@ test('MongoDB admin and cashier access, catalog editing, scan and atomic invoice
   const products=await (await request.get('/api/products',{headers:adminHeaders})).json();
   const pepsi=products.find(p=>p.name.startsWith('Pepsi'));
   const edit=await request.post(`/api/products/${pepsi._id}`,{headers:adminHeaders,data:{...pepsi,barcode:'1234567890128',price:125}});expect(edit.ok()).toBeTruthy();
-  const register=await request.post('/api/auth/register',{data:{name:'Test Cashier',email:'cashier@test.local',password:'TestPassword123!'}});expect(register.ok()).toBeTruthy();
-  const cashier=await register.json();expect(cashier.user.role).toBe('cashier');
+  expect((await request.post('/api/auth/register',{data:{name:'Forbidden',email:'public@test.local',password:'TestPassword123!'}})).status()).toBe(403);
+  const cashier=await provisionCashier(request,adminHeaders,'Test Cashier','cashier@test.local');expect(cashier.user.role).toBe('cashier');
   const cashierHeaders={Authorization:`Bearer ${cashier.token}`};
   expect((await request.post('/api/stores',{headers:cashierHeaders,data:{name:'Forbidden',location:'Forbidden'}})).status()).toBe(403);
   expect((await request.post('/api/stores',{data:{name:'Forbidden',location:'Forbidden'}})).status()).toBe(401);
@@ -173,7 +186,7 @@ test('MongoDB admin and cashier access, catalog editing, scan and atomic invoice
   const report=await (await request.get('/api/admin/sales',{headers:adminHeaders})).json();expect(report.summary).toMatchObject({units:3,revenue:362.5,discount:12.5,invoices:2});expect(report.rows[0]).toMatchObject({cashierName:'Test Cashier',quantity:3,productName:pepsi.name});
   expect((await request.get('/api/admin/sales',{headers:cashierHeaders})).status()).toBe(403);
   expect((await request.get('/api/admin/login-logs',{headers:cashierHeaders})).status()).toBe(403);
-  const secondCashier=await (await request.post('/api/auth/register',{data:{name:'Other Cashier',email:'other-cashier@test.local',password:'TestPassword123!'}})).json();
+  const secondCashier=await provisionCashier(request,adminHeaders,'Other Cashier','other-cashier@test.local');
   const otherHistory=await (await request.get('/api/invoices',{headers:{Authorization:`Bearer ${secondCashier.token}`}})).json();expect(otherHistory).toHaveLength(0);
   const filtered=await (await request.get('/api/admin/sales?cashier='+newTeam.find(u=>u.email==='cashier@test.local')._id,{headers:adminHeaders})).json();expect(filtered.summary.units).toBe(3);
   const emptyDay=await (await request.get('/api/admin/sales?from=2000-01-01&to=2000-01-01',{headers:adminHeaders})).json();expect(emptyDay.summary.units).toBe(0);
@@ -234,4 +247,20 @@ test('MongoDB admin and cashier access, catalog editing, scan and atomic invoice
   await mongoose.connection.db.collection('users').updateOne({email:account.email},{$set:{role:'cashier'}});await mongoose.disconnect();
   const staleToken=(await secondLogin.json()).token;
   const demoted=await request.post('/api/users/admins',{headers:{Authorization:`Bearer ${staleToken}`},data:{...account,email:'third@test.local'}});expect(demoted.status()).toBe(403);
+});
+
+test('admin creates cashier and first login requires a new password',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ await page.goto('/');await page.evaluate(admin=>localStorage.setItem('asp-session',JSON.stringify(admin)),admin);await page.goto('/#/team');await page.reload();
+ await page.getByRole('button',{name:'Create cashier',exact:true}).click();
+ const dialog=page.getByRole('dialog');await dialog.getByLabel('Name',{exact:true}).fill('New Cashier');await dialog.getByLabel('Email',{exact:true}).fill('newcashier@test.local');await dialog.getByLabel('Temporary password',{exact:true}).fill('Temporary123!');await dialog.getByRole('button',{name:'Create cashier account'}).click();await expect(dialog).toHaveCount(0);
+ const temp=await (await request.post('/api/auth/login',{data:{email:'newcashier@test.local',password:'Temporary123!'}})).json();
+ await page.evaluate(temp=>localStorage.setItem('asp-session',JSON.stringify(temp)),temp);await page.reload();
+ await expect(page.getByRole('heading',{name:'Choose your new password'})).toBeVisible();
+ await page.reload();await expect(page.getByRole('heading',{name:'Choose your new password'})).toBeVisible();
+ await page.getByLabel('Temporary password',{exact:true}).fill('Temporary123!');await page.getByLabel('New password',{exact:true}).fill('CashierNew123!');await page.getByLabel('Confirm new password',{exact:true}).fill('CashierNew123!');await page.getByRole('button',{name:'Save new password'}).click();
+ await expect(page.getByRole('heading',{name:'Choose your new password'})).toHaveCount(0);
+ const login=await request.post('/api/auth/login',{data:{email:'newcashier@test.local',password:'CashierNew123!'}});expect(login.ok()).toBeTruthy();
+ const cashier=await login.json();const headers={Authorization:`Bearer ${cashier.token}`};expect((await request.post('/api/users/cashiers',{headers,data:{name:'Forbidden',email:'bad@test.local',password:'Temporary123!'}})).status()).toBe(403);
+ expect((await request.post('/api/users/admins',{headers,data:{name:'Forbidden',email:'bad@test.local',password:'Temporary123!'}})).status()).toBe(403);
 });
