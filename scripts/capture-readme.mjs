@@ -31,7 +31,7 @@ async function snapshot(page,name){
  await page.evaluate(()=>document.activeElement?.blur());
  const sidebar=await page.locator('.sidebar').boundingBox();
  assert.ok(sidebar&&Math.abs(sidebar.height-page.viewportSize().height)<2,'Sidebar must cover the full screenshot height.');
- await page.screenshot({path:`${output}/${name}.png`,fullPage:false,animations:'disabled'});
+ await page.screenshot({path:`${output}/${name==='dashboard'?'dashboard-overview':name}.png`,fullPage:false,animations:'disabled'});
  await page.setViewportSize(viewport);
  console.log('Captured '+name);
 }
