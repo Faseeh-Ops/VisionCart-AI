@@ -3,6 +3,7 @@ export function calculateInvoice(items, products) {
   if (!Array.isArray(items) || !items.length || items.length > 200) throw new Error('Add products to the invoice.');
   const merged = new Map();
   for (const item of items) {
+    if (!item || typeof item.productId !== 'string' || !item.productId) throw new Error('Invalid invoice item.');
     if (!Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > 10000) throw new Error('Invalid quantity.');
     merged.set(item.productId, (merged.get(item.productId) || 0) + item.quantity);
   }
