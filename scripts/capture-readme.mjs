@@ -11,6 +11,8 @@ import bcrypt from 'bcryptjs';
 const database=`aspire_readme_${Date.now()}`;
 const uri=`mongodb://127.0.0.1:27017/${database}?replicaSet=aspire-rs`;
 const base='http://127.0.0.1:4003',output='docs/screenshots';
+const selectedScreens=process.argv.slice(2);
+assert.ok(selectedScreens.every(name=>['dashboard','billing','store-details','invoice-search','stock-transfer'].includes(name)),'Unknown screenshot name.');
 const password=randomUUID(),secret=randomUUID()+randomUUID();
 let server,browser,serverOutput='';
 async function api(route,token,body){
@@ -18,10 +20,19 @@ async function api(route,token,body){
  const data=await response.json();assert.ok(response.ok,route+': '+JSON.stringify(data));return data;
 }
 async function snapshot(page,name){
+ if(selectedScreens.length&&!selectedScreens.includes(name))return;
  await page.evaluate(()=>document.fonts.ready);
  await page.locator('main').evaluate(element=>element.scrollTo(0,0));
- const viewport=page.viewportSize();if(name==='store-details'||name==='billing')await page.setViewportSize({width:1600,height:name==='billing'?1360:1760});await page.evaluate(()=>document.activeElement?.blur());
- await page.screenshot({path:`${output}/${name}.png`,fullPage:name==='dashboard',animations:'disabled'});if(name==='store-details'||name==='billing')await page.setViewportSize(viewport);
+ const viewport=page.viewportSize();
+ // Match the viewport to the page before capture so the fixed sidebar fills
+ // the entire image instead of leaving an empty strip below its original height.
+ if(name==='dashboard')await page.setViewportSize({width:1600,height:Math.ceil(await page.evaluate(()=>document.documentElement.scrollHeight))});
+ if(name==='store-details'||name==='billing')await page.setViewportSize({width:1600,height:name==='billing'?1360:1760});
+ await page.evaluate(()=>document.activeElement?.blur());
+ const sidebar=await page.locator('.sidebar').boundingBox();
+ assert.ok(sidebar&&Math.abs(sidebar.height-page.viewportSize().height)<2,'Sidebar must cover the full screenshot height.');
+ await page.screenshot({path:`${output}/${name}.png`,fullPage:false,animations:'disabled'});
+ await page.setViewportSize(viewport);
  console.log('Captured '+name);
 }
 try{
