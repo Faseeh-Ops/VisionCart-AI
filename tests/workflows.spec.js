@@ -1,3 +1,4 @@
+import {QRCodeWriter,BarcodeFormat} from '@zxing/library';
 import {test,expect} from '@playwright/test';
 import mongoose from 'mongoose';
 import config from '../playwright.config.js';
@@ -95,7 +96,7 @@ test('decodes a real EAN-13 barcode image into its matching product',async({page
   await page.getByRole('button',{name:'Save product',exact:true}).click();
   await page.getByRole('button',{name:'Billing station',exact:true}).click();
   const png=await page.evaluate(barcodeImage);
-  await page.getByLabel('Scan barcode photo').setInputFiles({name:'barcode.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+  await page.getByLabel('Scan barcode / QR photo').setInputFiles({name:'barcode.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
   await expect(page.locator('.cart-row')).toContainText('Pepsi');
   await expect(page.locator('.detection-result')).toContainText('Rs 120');
 });
@@ -198,6 +199,7 @@ test('MongoDB admin and cashier access, catalog editing, scan and atomic invoice
   await page.getByRole('button',{name:'Login logs',exact:true}).click();await expect(page.locator('.report-table')).toContainText('cashier@test.local');
   await page.screenshot({path:'test-results/login-logs.png',fullPage:true});
   await page.getByRole('button',{name:'Sales reports',exact:true}).click();await expect(page.locator('.report-table')).toContainText('Test Cashier');await page.screenshot({path:'test-results/sales-report.png',fullPage:true});
+  expect((await request.post('/api/inventory/restock',{headers:adminHeaders,data:{storeId:clifton._id,barcode:'1234567890128',quantity:5,requestId:'clifton-opening-stock-test'}})).ok()).toBeTruthy();
   const cashierPage=await browser.newPage();
   await cashierPage.goto('/');await cashierPage.getByRole('button',{name:'Sign in',exact:true}).click();await cashierPage.getByLabel('Email',{exact:true}).fill('cashier@test.local');await cashierPage.getByLabel('Password',{exact:true}).fill('TestPassword123!');await cashierPage.locator('.modal').getByRole('button',{name:'Sign in',exact:true}).click();
   await expect(cashierPage.locator('.connection')).toContainText('Connected workspace');
@@ -261,6 +263,287 @@ test('admin creates cashier and first login requires a new password',async({page
  await page.getByLabel('Temporary password',{exact:true}).fill('Temporary123!');await page.getByLabel('New password',{exact:true}).fill('CashierNew123!');await page.getByLabel('Confirm new password',{exact:true}).fill('CashierNew123!');await page.getByRole('button',{name:'Save new password'}).click();
  await expect(page.getByRole('heading',{name:'Choose your new password'})).toHaveCount(0);
  const login=await request.post('/api/auth/login',{data:{email:'newcashier@test.local',password:'CashierNew123!'}});expect(login.ok()).toBeTruthy();
- const cashier=await login.json();const headers={Authorization:`Bearer ${cashier.token}`};expect((await request.post('/api/users/cashiers',{headers,data:{name:'Forbidden',email:'bad@test.local',password:'Temporary123!'}})).status()).toBe(403);
+ await expect(page.getByRole('button',{name:'Team & access',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Products',exact:true}).click();await expect(page.getByRole('button',{name:'Add product',exact:true})).toHaveCount(0);
+ await page.getByLabel('Open account menu').click();await page.getByRole('button',{name:'Profile & photo',exact:true}).click();await expect(page.getByRole('heading',{name:'Profile & photo',exact:true,level:2})).toBeVisible();
+ const cashier=await login.json();const headers={Authorization:`Bearer ${cashier.token}`};
+
+ expect((await request.get('/api/nonexistent',{headers})).status()).toBe(404);
+ expect((await request.get('/api/nonexistent',{headers})).headers()['content-type']).toContain('application/json');
+ for(const items of [{},[null],[{productId:'not-an-id',quantity:1}],[{productId:'000000000000000000000001',quantity:0}]]){
+  const invalid=await request.post('/api/invoices',{headers,data:{items}});expect(invalid.status()).toBe(400);expect((await invalid.json()).error).toContain('valid product IDs');
+ }
+ expect((await request.post('/api/users/admins',{headers:{Authorization:`Bearer ${admin.token}`},data:{name:'Unicode Password',email:'utf8@test.local',password:String.fromCharCode(233).repeat(40)}})).status()).toBe(400);
+
+ expect((await request.post('/api/cameras/rtsp/connect',{data:{url:'rtsp://192.168.1.50/stream'}})).status()).toBe(401);
+ expect((await request.post('/api/cameras/rtsp/connect',{headers,data:{url:'file:///private'}})).status()).toBe(400);
+ expect((await request.post('/api/users/cashiers',{headers,data:{name:'Forbidden',email:'bad@test.local',password:'Temporary123!'}})).status()).toBe(403);
  expect((await request.post('/api/users/admins',{headers,data:{name:'Forbidden',email:'bad@test.local',password:'Temporary123!'}})).status()).toBe(403);
+});
+
+async function qrPhoto(page,text) {
+ const matrix=new QRCodeWriter().encode(text,BarcodeFormat.QR_CODE,320,320,new Map());
+ const size=matrix.getWidth();const bits=[];for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(matrix.get(x,y))bits.push([x,y]);
+ return Buffer.from(await page.evaluate(({size,bits})=>{const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,size,size);ctx.fillStyle='black';for(const [x,y] of bits)ctx.fillRect(x,y,1,1);return canvas.toDataURL('image/png').split(',')[1];},{size,bits}),'base64');
+}
+test('automatically identifies QR photos and rejects unregistered QR links',async({page})=>{
+ await page.goto('/#/billing');
+ const qr=await qrPhoto(page,'ASPIRE-PEPSI-500');
+ await page.getByLabel('Scan barcode / QR photo').setInputFiles({name:'product-qr.png',mimeType:'image/png',buffer:qr});
+ await expect(page.locator('.cart-row')).toContainText('Pepsi');await expect(page.locator('.detection-result')).toContainText('QR code (QR_CODE)');
+ const unknown=await qrPhoto(page,'https://example.com/not-a-product');
+ await page.getByLabel('Scan barcode / QR photo').setInputFiles({name:'unknown-qr.png',mimeType:'image/png',buffer:unknown});
+ await expect(page.locator('.detection-result')).toContainText('Unverified product');await expect(page.locator('.cart-row')).toHaveCount(1);await expect(page).toHaveURL(/#\/billing/);
+});
+test('RTSP frames automatically identify and bill a matching QR code once',async({page,request})=>{
+ const account=await (await request.post('/api/auth/login',{data:{email:'newcashier@test.local',password:'CashierNew123!'}})).json();
+ await page.goto('/');await page.evaluate(account=>localStorage.setItem('asp-session',JSON.stringify(account)),account);await page.goto('/#/billing');await page.reload();
+ // Camera transport is mocked; actual QR decoding runs against the image.
+ const qr=await qrPhoto(page,'ASPIRE-LAYS-52');
+ await page.route('**/api/cameras/rtsp/connect',route=>route.fulfill({status:201,json:{id:'qr-test'}}));
+ await page.route('**/api/cameras/rtsp/qr-test/frame',route=>route.fulfill({contentType:'image/png',body:qr}));
+ await page.route('**/api/cameras/rtsp/qr-test/disconnect',route=>route.fulfill({json:{success:true}}));
+ await page.getByRole('button',{name:'Connect RTSP camera',exact:true}).click();await page.getByLabel('RTSP camera address').fill('rtsp://192.168.1.50/stream');await page.getByRole('button',{name:'Connect RTSP camera',exact:true}).last().click();
+ await expect(page.locator('.cart-row')).toHaveCount(1);await expect(page.locator('.detection-result')).toContainText('QR code (QR_CODE)');
+ await page.getByRole('button',{name:'Use webcam instead'}).click();await expect(page.locator('.cart-row')).toHaveCount(1);
+});
+
+test('cashier requests admin-reviewed recovery and replaces assigned temporary password',async({page,request,browser})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ const adminHeaders={Authorization:`Bearer ${admin.token}`};
+ const original=await provisionCashier(request,adminHeaders,'Recovery Cashier','recovery@test.local');
+ const oldHeaders={Authorization:`Bearer ${original.token}`};
+ const adminNotifications=await browser.newPage();await adminNotifications.goto('/');await adminNotifications.evaluate(admin=>localStorage.setItem('asp-session',JSON.stringify(admin)),admin);await adminNotifications.reload();
+ await page.goto('/');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('button',{name:'Forgot password?'}).click();
+ await page.getByLabel('Account email').fill('recovery@test.local');await page.getByRole('button',{name:'Send reset request'}).click();await expect(page.getByRole('status')).toContainText('administrator review');
+ await expect(adminNotifications.getByLabel('1 pending password reset requests')).toBeVisible({timeout:12000});await adminNotifications.getByRole('button',{name:'Notifications',exact:true}).click();await expect(adminNotifications.locator('.password-request-notification')).toContainText('recovery@test.local');await adminNotifications.getByRole('button',{name:'Review password request'}).click();await expect(adminNotifications).toHaveURL(/#\/password-requests/);await expect(adminNotifications.locator('.notification-badge')).toContainText('1');
+ const repeat=await request.post('/api/auth/password-reset-request',{data:{email:'recovery@test.local'}});expect(repeat.status()).toBe(202);
+ const unknown=await request.post('/api/auth/password-reset-request',{data:{email:'missing@test.local'}});expect(await unknown.json()).toEqual(await repeat.json());
+ await request.post('/api/auth/password-reset-request',{data:{email:'admin@test.local'}});
+ expect((await request.get('/api/admin/password-resets')).status()).toBe(401);
+ expect((await request.get('/api/admin/password-resets',{headers:oldHeaders})).status()).toBe(403);
+ const pending=await (await request.get('/api/admin/password-resets',{headers:adminHeaders})).json();expect(pending).toHaveLength(1);expect(pending[0].email).toBe('recovery@test.local');
+ expect((await request.post('/api/admin/password-resets/'+pending[0]._id+'/resolve',{headers:oldHeaders,data:{temporaryPassword:'RecoveryTemp123!'}})).status()).toBe(403);
+ expect((await request.get('/api/products',{headers:oldHeaders})).ok()).toBe(true);
+ await page.evaluate(admin=>localStorage.setItem('asp-session',JSON.stringify(admin)),admin);await page.goto('/#/password-requests');await page.reload();
+ await page.getByRole('button',{name:'Assign temporary password'}).click();await page.getByLabel('New temporary password').fill('RecoveryTemp123!');await page.getByRole('button',{name:'Assign password',exact:true}).click();
+ await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByText('No pending password reset requests.')).toBeVisible();await expect(page.locator('.notification-badge')).toHaveCount(0);await expect(adminNotifications.locator('.notification-badge')).toHaveCount(0,{timeout:12000});await adminNotifications.close();
+ expect((await request.get('/api/products',{headers:oldHeaders})).status()).toBe(401);
+ expect((await request.post('/api/auth/login',{data:{email:'recovery@test.local',password:'TestPassword123!'}})).status()).toBe(401);
+ expect((await request.post('/api/admin/password-resets/'+pending[0]._id+'/resolve',{headers:adminHeaders,data:{temporaryPassword:'AnotherTemp123!'}})).status()).toBe(409);
+ const temp=await (await request.post('/api/auth/login',{data:{email:'recovery@test.local',password:'RecoveryTemp123!'}})).json();expect(temp.user.mustChangePassword).toBe(true);
+ await page.evaluate(temp=>localStorage.setItem('asp-session',JSON.stringify(temp)),temp);await page.reload();
+ await page.getByLabel('Temporary password',{exact:true}).fill('RecoveryTemp123!');await page.getByLabel('New password',{exact:true}).fill('RecoveredFinal123!');await page.getByLabel('Confirm new password',{exact:true}).fill('RecoveredFinal123!');await page.getByRole('button',{name:'Save new password'}).click();await expect(page.getByRole('heading',{name:'Choose your new password'})).toHaveCount(0);
+ expect((await request.post('/api/auth/login',{data:{email:'recovery@test.local',password:'RecoveredFinal123!'}})).ok()).toBe(true);
+ expect((await request.post('/api/auth/login',{data:{email:'recovery@test.local',password:'RecoveryTemp123!'}})).status()).toBe(401);
+ const logs=await (await request.get('/api/admin/login-logs',{headers:adminHeaders})).json();expect(logs.logs.some(log=>log.action==='password-reset'&&log.email==='recovery@test.local')).toBe(true);expect(JSON.stringify(logs)).not.toContain('RecoveryTemp123!');
+});
+
+test('online Pakistani Tiger barcode and QR support inventory, billing and stock deduction',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ const headers={Authorization:`Bearer ${admin.token}`};
+ const created=await request.post('/api/products',{headers,data:{name:'LU Tiger biscuits - online scanner test',barcode:'8961003694271',price:10,stock:5,category:'Biscuits',discountPercent:0}});expect(created.ok()).toBe(true);const product=await created.json();
+ await page.goto('/');await page.evaluate(admin=>localStorage.setItem('asp-session',JSON.stringify(admin)),admin);await page.goto('/#/products');await page.reload();
+ await page.getByRole('button',{name:'Scan into inventory'}).click();const inventory=page.getByRole('dialog');
+ await inventory.getByLabel('Inventory barcode photo').setInputFiles('tests/fixtures/tiger-ean13-online.png');
+ await expect(inventory).toContainText('LU Tiger biscuits - online scanner test');await expect(inventory).toContainText('EAN_13');
+ await inventory.getByLabel('Units to add').fill('2');await page.screenshot({path:'test-results/pakistani-tiger-inventory.png',fullPage:true});
+ await inventory.getByRole('button',{name:'Confirm stock addition'}).click();await expect(inventory).toHaveCount(0);
+ const stocked=await (await request.get('/api/products',{headers})).json();expect(stocked.find(p=>p._id===product._id).stock).toBe(7);
+ const cashier=await provisionCashier(request,headers,'Online Scanner Cashier','online-scanner@test.local');const cashierHeaders={Authorization:`Bearer ${cashier.token}`};
+ await page.evaluate(cashier=>localStorage.setItem('asp-session',JSON.stringify(cashier)),cashier);await page.reload();await page.getByRole('button',{name:'Billing station',exact:true}).click();await expect(page).toHaveURL(/#\/billing/);
+ const barcodeResponse=page.waitForResponse(response=>response.url().endsWith('/api/scans')&&response.request().method()==='POST');
+ await page.getByLabel('Scan barcode / QR photo').setInputFiles('tests/fixtures/tiger-ean13-online.png');expect(await (await barcodeResponse).json()).toMatchObject({verified:true,format:'EAN_13'});
+ await expect(page.locator('.detection-result')).toContainText('Barcode (EAN_13)');await expect(page.locator('.cart-row')).toContainText('LU Tiger');
+ await page.screenshot({path:'test-results/pakistani-tiger-barcode.png',fullPage:true});
+ const qrResponse=page.waitForResponse(response=>response.url().endsWith('/api/scans')&&response.request().method()==='POST');
+ await page.getByLabel('Scan barcode / QR photo').setInputFiles('tests/fixtures/tiger-qr-online.png');expect(await (await qrResponse).json()).toMatchObject({verified:true,format:'QR_CODE'});
+ await expect(page.locator('.detection-result')).toContainText('QR code (QR_CODE)');await expect(page.locator('.cart-row')).toHaveCount(1);
+ await page.screenshot({path:'test-results/pakistani-tiger-qr.png',fullPage:true});
+ const invoiceResponse=page.waitForResponse(response=>response.url().endsWith('/api/invoices')&&response.request().method()==='POST');
+ await page.getByRole('button',{name:'Generate invoice'}).click();const invoice=await (await invoiceResponse).json();expect(invoice.total).toBe(20);expect(invoice.items).toHaveLength(1);expect(invoice.items[0]).toMatchObject({productId:product._id,barcode:'8961003694271',quantity:2,price:10,total:20});
+ await expect(page.locator('.receipt-modal')).toContainText('LU Tiger');await page.screenshot({path:'test-results/pakistani-tiger-invoice.png',fullPage:true});
+ const remaining=await (await request.get('/api/products',{headers})).json();expect(remaining.find(p=>p._id===product._id).stock).toBe(5);
+ const history=await (await request.get('/api/invoices',{headers:cashierHeaders})).json();expect(history.some(saved=>saved._id===invoice._id&&saved.total===20)).toBe(true);
+});
+
+
+test('inventory is isolated by store for admin edits, scans and concurrent sales',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ const headers={Authorization:`Bearer ${admin.token}`};
+ const main='000000000000000000000001';
+ const branch=await (await request.post('/api/stores',{headers,data:{name:'Independent inventory branch',location:'Lahore'}})).json();
+ const product=await (await request.post('/api/products',{headers,data:{name:'Branch test biscuits',barcode:'BRANCH-ISOLATION-TEST',price:10,stock:7,storeId:main}})).json();
+ const stock=async(storeId)=>(await (await request.get('/api/products?storeId='+storeId,{headers})).json()).find(p=>p._id===product._id).stock;
+ expect(await stock(main)).toBe(7);expect(await stock(branch._id)).toBe(0);
+ const addition={storeId:branch._id,barcode:product.barcode,quantity:2,requestId:'branch-isolated-restock-123'};
+ for(let n=0;n<2;n++)expect((await request.post('/api/inventory/restock',{headers,data:addition})).ok()).toBeTruthy();
+ expect(await stock(branch._id)).toBe(2);expect(await stock(main)).toBe(7);
+ expect((await request.post('/api/products/'+product._id,{headers,data:{...product,storeId:branch._id,stock:2,price:12}})).ok()).toBeTruthy();
+ expect(await stock(main)).toBe(7);expect(await stock(branch._id)).toBe(2);
+ expect((await request.post('/api/inventory/restock',{headers,data:{...addition,storeId:main}})).ok()).toBe(false);
+ const cashier=await provisionCashier(request,headers,'Branch cashier','branch-isolation@test.local');const cashHeaders={Authorization:`Bearer ${cashier.token}`};
+ await request.post('/api/profile/store',{headers:cashHeaders,data:{storeId:branch._id}});
+ const scan=await (await request.post('/api/scans',{headers:cashHeaders,data:{barcode:product.barcode,storeId:main}})).json();expect(scan.product.stock).toBe(2);
+ const spoofed=await (await request.get('/api/products?storeId='+main,{headers:cashHeaders})).json();expect(spoofed.find(p=>p._id===product._id).stock).toBe(2);
+ const sale={storeId:branch._id,items:[{productId:product._id,quantity:2}],payment:'Cash'};
+ const results=await Promise.all([request.post('/api/invoices',{headers:cashHeaders,data:sale}),request.post('/api/invoices',{headers:cashHeaders,data:sale})]);expect(results.filter(r=>r.ok())).toHaveLength(1);
+ expect(await stock(branch._id)).toBe(0);expect(await stock(main)).toBe(7);
+ expect((await request.post('/api/invoices',{headers:cashHeaders,data:{...sale,storeId:main}})).status()).toBe(409);
+ await page.goto('/');await page.evaluate(account=>localStorage.setItem('asp-session',JSON.stringify(account)),admin);await page.reload();
+ await page.getByLabel('Inventory store',{exact:true}).selectOption(branch._id);await page.getByRole('button',{name:'Products',exact:true}).click();
+ await expect(page.locator('.catalog-product').filter({hasText:'Branch test biscuits'})).toContainText('0');
+ await page.getByLabel('Inventory store',{exact:true}).selectOption(main);
+ await expect.poll(()=>stock(main)).toBe(7);
+});
+
+
+test('admin allocates and returns stock with audit history and no duplicate or oversold transfers',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();const headers={Authorization:`Bearer ${admin.token}`},main='000000000000000000000001';
+ const store=await (await request.post('/api/stores',{headers,data:{name:'Allocation test Carrefour',location:'Lahore'}})).json();
+ const product=await (await request.post('/api/products',{headers,data:{name:'Allocation biscuits',barcode:'ALLOCATION-BISCUITS-TEST',price:10,stock:500,storeId:main}})).json();
+ const stock=async id=>(await (await request.get('/api/products?storeId='+id,{headers})).json()).find(p=>p._id===product._id).stock;
+ const cashier=await provisionCashier(request,headers,'Allocation cashier','allocation@test.local');const cashierHeaders={Authorization:`Bearer ${cashier.token}`};
+ const transfer={productId:product._id,fromStoreId:main,toStoreId:store._id,quantity:100,requestId:'allocation-permission-test'};
+ expect((await request.post('/api/inventory/transfers',{data:transfer})).status()).toBe(401);
+ expect((await request.post('/api/inventory/transfers',{headers:cashierHeaders,data:transfer})).status()).toBe(403);
+ expect((await request.get('/api/inventory/transfers',{headers:cashierHeaders})).status()).toBe(403);
+ await page.goto('/');await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),admin);await page.reload();
+ await page.getByRole('button',{name:'Allocate stock between stores',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Allocate stock between stores'});
+ await dialog.getByLabel('To store',{exact:true}).selectOption(store._id);await dialog.getByLabel('Product to allocate').selectOption(product._id);await dialog.getByLabel('Units to transfer').fill('100');
+ await expect(dialog.locator('.transfer-preview')).toContainText('500 \u2192 400 units');await dialog.getByRole('button',{name:'Transfer stock',exact:true}).click();
+ await expect(dialog.getByRole('status')).toContainText('100 units of Allocation biscuits transferred');expect(await stock(main)).toBe(400);expect(await stock(store._id)).toBe(100);
+ await expect(dialog.locator('.transfer-history')).toContainText('Allocation biscuits');await expect(dialog.locator('.transfer-history')).toContainText('Test Admin');
+ const back={...transfer,fromStoreId:store._id,toStoreId:main,quantity:20,requestId:'allocation-return-idempotent'};
+ for(let i=0;i<2;i++)expect((await request.post('/api/inventory/transfers',{headers,data:back})).ok()).toBeTruthy();
+ expect(await stock(main)).toBe(420);expect(await stock(store._id)).toBe(80);
+ expect((await request.post('/api/inventory/transfers',{headers,data:{...back,quantity:21}})).ok()).toBe(false);
+ for(const invalid of [{...transfer,toStoreId:main},{...transfer,quantity:-1},{...transfer,quantity:1.5},{...transfer,quantity:100001},{...transfer,productId:'bad'}])expect((await request.post('/api/inventory/transfers',{headers,data:invalid})).status()).toBe(400);
+ const concurrent=await Promise.all(['allocation-race-one','allocation-race-two'].map(requestId=>request.post('/api/inventory/transfers',{headers,data:{...transfer,quantity:300,requestId}})));expect(concurrent.filter(r=>r.ok())).toHaveLength(1);
+ expect(await stock(main)).toBe(120);expect(await stock(store._id)).toBe(380);
+ await request.post('/api/stores/'+store._id+'/status',{headers,data:{active:false}});
+ expect((await request.post('/api/inventory/transfers',{headers,data:{...transfer,quantity:1,requestId:'allocation-inactive-test'}})).ok()).toBe(false);
+ expect(await stock(main)).toBe(120);expect(await stock(store._id)).toBe(380);
+ const history=await (await request.get('/api/inventory/transfers',{headers})).json();expect(history.filter(t=>t.productId===product._id)).toHaveLength(3);
+ await dialog.getByRole('button',{name:'Close stock allocation'}).click();
+ await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),cashier);await page.reload();await expect(page.getByRole('button',{name:'Allocate stock between stores',exact:true})).toHaveCount(0);
+});
+
+
+test('admin store details track cashier actions and download complete filtered stock and activity',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json(),headers={Authorization:`Bearer ${admin.token}`};
+ const branch=await (await request.post('/api/stores',{headers,data:{name:'Tracking Carrefour',location:'Lahore'}})).json(),other=await (await request.post('/api/stores',{headers,data:{name:'Tracking other branch',location:'Karachi'}})).json();
+ const product=await (await request.post('/api/products',{headers,data:{storeId:branch._id,name:'Tracking biscuits',barcode:'TRACK-BISCUITS',price:10,stock:100,category:'Biscuits'}})).json();
+ expect((await request.post('/api/products/'+product._id,{headers,data:{...product,storeId:branch._id,stock:100}})).ok()).toBeTruthy();
+ expect((await request.post('/api/inventory/restock',{headers,data:{storeId:branch._id,barcode:product.barcode,quantity:10,requestId:'tracking-restock-12345'}})).ok()).toBeTruthy();
+ expect((await request.post('/api/inventory/transfers',{headers,data:{productId:product._id,fromStoreId:branch._id,toStoreId:other._id,quantity:20,requestId:'tracking-transfer-12345'}})).ok()).toBeTruthy();
+ const cashier=await provisionCashier(request,headers,'Naveed Tracking','naveed-tracking@test.local'),cashHeaders={Authorization:`Bearer ${cashier.token}`};
+ const selected=await request.post('/api/profile/store',{headers:cashHeaders,data:{storeId:branch._id}});expect(selected.ok(),await selected.text()).toBeTruthy();
+ await request.post('/api/auth/login',{data:{email:'naveed-tracking@test.local',password:'TestPassword123!',role:'cashier'}});
+ await request.post('/api/scans',{headers:cashHeaders,data:{barcode:product.barcode,format:'QR_CODE'}});
+ const invoiceResponse=await request.post('/api/invoices',{headers:cashHeaders,data:{storeId:branch._id,items:[{productId:product._id,quantity:2}],payment:'Cash'}});expect(invoiceResponse.ok(),await invoiceResponse.text()).toBeTruthy();const invoice=await invoiceResponse.json();
+ for(let i=0;i<55;i++)expect((await request.post('/api/scans',{headers:cashHeaders,data:{barcode:'TRACK-UNKNOWN-'+i}})).ok()).toBeTruthy();
+ await request.post('/api/auth/logout',{headers:cashHeaders,data:{}});
+ await request.post('/api/profile/store',{headers:cashHeaders,data:{storeId:other._id}});
+ await request.post('/api/scans',{headers:cashHeaders,data:{barcode:'OTHER-BRANCH-ONLY'}});
+ const base='/api/admin/store-reports/'+branch._id;
+ for(const suffix of ['/details','/activity','/export?kind=inventory','/export?kind=activity']){expect((await request.get(base+suffix)).status()).toBe(401);expect((await request.get(base+suffix,{headers:cashHeaders})).status()).toBe(403);}
+ expect((await request.get('/api/admin/store-reports/bad/details',{headers})).status()).toBe(400);
+ expect((await request.get(base+'/activity?from=2026-02-30',{headers})).status()).toBe(400);
+ expect((await request.get(base+'/export?kind=activity&from=2026-02-30',{headers})).status()).toBe(400);
+ const details=await (await request.get(base+'/details',{headers})).json();expect(details.summary.units).toBe(88);expect(details.products.find(p=>p.productId===product._id)).toMatchObject({stock:88,price:10});
+ const activity=await (await request.get(base+'/activity',{headers})).json();expect(activity.total).toBeGreaterThan(50);expect(activity.rows).toHaveLength(50);expect(activity.rows.some(r=>r.barcode==='OTHER-BRANCH-ONLY')).toBe(false);
+ const cashierId=(await (await request.get('/api/users',{headers})).json()).find(u=>u.email==='naveed-tracking@test.local')._id;
+ const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Karachi',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const filtered='actor='+cashierId+'&from='+today+'&to='+today;
+ const csvResponse=await request.get(base+'/export?kind=activity&'+filtered,{headers});expect(csvResponse.ok()).toBeTruthy();const csv=await csvResponse.text();expect(csv).toContain('Naveed Tracking');expect(csv).toContain(invoice.number);expect(csv).toContain('"Sale","Tracking biscuits","TRACK-BISCUITS","2","20"');expect(csv).toContain('TRACK-UNKNOWN-0');expect(csv).toContain('TRACK-UNKNOWN-54');expect(csv).not.toContain('OTHER-BRANCH-ONLY');expect(csv).not.toContain('Product registered');expect(csv.split('\r\n').length).toBeGreaterThan(55);
+ const allCsv=await (await request.get(base+'/export?kind=activity',{headers})).text();for(const action of ['Product registered','Product / stock updated','Stock added','Transfer out','Store selected','login','logout'])expect(allCsv).toContain(action);
+ const otherCsv=await (await request.get('/api/admin/store-reports/'+other._id+'/export?kind=activity',{headers})).text();expect(otherCsv).toContain('Transfer in');expect(otherCsv).not.toContain(invoice.number);
+ const old=await (await request.get(base+'/activity?to=2000-01-01',{headers})).json();expect(old.total).toBe(0);
+ await page.goto('/');await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),admin);await page.reload();await page.getByRole('button',{name:'Stores',exact:true}).click();await page.getByRole('button',{name:'View details for Tracking Carrefour',exact:true}).click();
+ await expect(page).toHaveURL(/store-details/);await expect(page.getByRole('heading',{name:'Product stock: Tracking Carrefour'})).toBeVisible();await page.getByLabel('Find store product').fill('Tracking biscuits');await expect(page.locator('.store-details tbody').first()).toContainText('88');
+ await page.getByLabel('Store activity account').selectOption(cashierId);await expect(page.locator('.store-activity-table')).toContainText('Naveed Tracking');await page.locator('.store-activity-table').getByRole('button',{name:'Next',exact:true}).click();await expect(page.locator('.store-activity-table')).toContainText(invoice.number);
+ const event=page.waitForEvent('download');await page.getByRole('button',{name:'Download activity CSV',exact:true}).click();const download=await event;expect(download.suggestedFilename()).toBe('Tracking-Carrefour-activity.csv');const stream=await download.createReadStream();const chunks=[];for await(const chunk of stream)chunks.push(chunk);expect(Buffer.concat(chunks).toString('utf8')).toContain('TRACK-UNKNOWN-54');
+ const inventoryEvent=page.waitForEvent('download');await page.getByRole('button',{name:'Download inventory CSV',exact:true}).click();const inventoryDownload=await inventoryEvent;const inventoryStream=await inventoryDownload.createReadStream();const inventoryChunks=[];for await(const chunk of inventoryStream)inventoryChunks.push(chunk);expect(Buffer.concat(inventoryChunks).toString('utf8')).toContain('"Tracking biscuits","TRACK-BISCUITS","Biscuits","88","10"');
+ await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),cashier);await page.goto('/#/store-details');await page.reload();await expect(page.getByRole('button',{name:'Store details',exact:true})).toHaveCount(0);await expect(page.locator('.role-note')).toContainText('Administrator access is required');
+});
+
+
+test('invoice search filters all receipts, respects cashier access and reprints historical prices',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json(),headers={Authorization:`Bearer ${admin.token}`};
+ const cashier=await provisionCashier(request,headers,'Invoice Search Naveed','invoice-search@test.local'),other=await provisionCashier(request,headers,'Invoice Search Ali','invoice-other@test.local');
+ const cashHeaders={Authorization:`Bearer ${cashier.token}`};
+ const users=await (await request.get('/api/users',{headers})).json(),naveed=users.find(u=>u.email==='invoice-search@test.local'),ali=users.find(u=>u.email==='invoice-other@test.local');
+ const branch=await (await request.post('/api/stores',{headers,data:{name:'Invoice Search Carrefour',location:'Lahore'}})).json(),second=await (await request.post('/api/stores',{headers,data:{name:'Invoice Search Imtiaz',location:'Karachi'}})).json();
+ const item={productId:'000000000000000000000099',name:'Historical search biscuits',barcode:'HISTORICAL-SEARCH',price:12,originalPrice:12,discountPercent:0,discountTotal:0,quantity:1,total:12};
+ const base={items:[item],total:12,subtotal:12,discountTotal:0,payment:'Cash',cashier:naveed._id,cashierName:naveed.name,storeId:branch._id,storeName:branch.name,storeLocation:branch.location};
+ const records=Array.from({length:104},(_,i)=>({...base,number:'SEARCH-2025-'+String(i).padStart(3,'0'),createdAt:new Date(Date.parse('2025-01-10T19:00:00Z')+i*60000)}));
+ records.push({...base,number:'SEARCH-OLDEST-ARCHIVE',createdAt:new Date('2024-12-30T00:00:00Z')},{...base,number:'SEARCH-[LITERAL]',createdAt:new Date('2025-01-11T18:59:59Z')},{...base,number:'SEARCH-NEXT-DAY',createdAt:new Date('2025-01-11T19:00:00Z')},{...base,number:'SEARCH-OTHER-CASHIER',cashier:ali._id,cashierName:ali.name,storeId:second._id,storeName:second.name,createdAt:new Date('2025-01-10T19:00:00Z')});
+ await mongoose.connect(`mongodb://127.0.0.1:27017/${config.metadata.database}?replicaSet=aspire-rs`);await mongoose.connection.db.collection('invoices').insertMany(records);await mongoose.disconnect();
+ const path='/api/invoices/search',query='q=search-2025&cashier='+naveed._id+'&store='+branch._id+'&from=2025-01-11&to=2025-01-11';
+ expect((await request.get(path)).status()).toBe(401);
+ const results=await (await request.get(path+'?'+query,{headers})).json();expect(results.total).toBe(104);expect(results.invoices).toHaveLength(25);expect(results.pages).toBe(5);
+ expect((await (await request.get(path+'?'+query+'&page=5',{headers})).json()).invoices).toHaveLength(4);
+ const literal=await (await request.get(path+'?q='+encodeURIComponent('[LITERAL]'),{headers})).json();expect(literal.total).toBe(1);
+ expect((await (await request.get(path+'?q=SEARCH-NEXT-DAY&to=2025-01-11',{headers})).json()).total).toBe(0);
+ expect((await (await request.get(path+'?q=SEARCH-OLDEST-ARCHIVE',{headers})).json()).total).toBe(1);
+ const own=await (await request.get(path+'?q=SEARCH-', {headers:cashHeaders})).json();expect(own.total).toBe(107);expect(own.invoices.every(i=>i.cashier===naveed._id)).toBe(true);
+ expect((await request.get(path+'?cashier='+ali._id,{headers:cashHeaders})).status()).toBe(403);
+ expect((await (await request.get(path+'?q=SEARCH-OTHER-CASHIER',{headers:cashHeaders})).json()).total).toBe(0);
+ for(const invalid of ['from=2025-02-30','from=2025-02-03&to=2025-01-01','page=0','store=bad','q='+('x'.repeat(101))])expect((await request.get(path+'?'+invalid,{headers})).status()).toBe(400);
+ await request.post('/api/stores/'+branch._id+'/status',{headers,data:{active:false}});
+ const options=await (await request.get('/api/invoices/filters',{headers:cashHeaders})).json();expect(options.stores.some(s=>s._id===branch._id)).toBe(true);expect(options.cashiers.every(u=>u._id===naveed._id)).toBe(true);
+ await page.goto('/');await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),admin);await page.reload();await page.getByRole('button',{name:'Invoices',exact:true}).click();
+ await page.getByLabel('Search invoice number').fill('search-2025');await page.getByLabel('Invoice cashier',{exact:true}).selectOption(naveed._id);await page.getByLabel('Invoice store',{exact:true}).selectOption(branch._id);await page.getByLabel('Invoice from date').fill('2025-01-11');await page.getByLabel('Invoice to date').fill('2025-01-11');await page.getByRole('button',{name:'Search invoices',exact:true}).click();
+ await expect(page.locator('.invoice-history')).toContainText('104 invoices');await expect(page.locator('.invoice-history tbody tr')).toHaveCount(25);await page.locator('.invoice-history').getByRole('button',{name:'Next',exact:true}).click();await expect(page.locator('.report-pagination')).toContainText('Page 2 of 5');
+ await page.getByLabel('Search invoice number').fill('SEARCH-OLDEST-ARCHIVE');await page.getByLabel('Invoice from date').fill('');await page.getByLabel('Invoice to date').fill('');await page.getByRole('button',{name:'Search invoices',exact:true}).click();await expect(page.locator('.invoice-history tbody tr')).toHaveCount(1);await expect(page.locator('.report-pagination')).toContainText('Page 1 of 1');
+ await page.locator('.invoice-history').getByRole('button',{name:'View',exact:true}).click();await expect(page.locator('.receipt-modal')).toContainText('SEARCH-OLDEST-ARCHIVE');await expect(page.locator('.receipt-modal')).toContainText('Rs 12');await expect(page.locator('.receipt-modal')).toContainText('Historical search biscuits');
+ await page.evaluate(()=>{window.invoicePrintCalls=0;window.print=()=>{window.invoicePrintCalls++;};});await page.getByRole('button',{name:'Print / Save PDF'}).click();expect(await page.evaluate(()=>window.invoicePrintCalls)).toBe(1);await page.getByRole('button',{name:'Close dialog'}).click();
+ await page.getByRole('button',{name:'Reset filters',exact:true}).click();await page.getByLabel('Search invoice number').fill('DOES-NOT-EXIST');await page.getByRole('button',{name:'Search invoices',exact:true}).click();await expect(page.getByText('No invoices match these filters.')).toBeVisible();
+ await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),cashier);await page.reload();await expect(page.getByLabel('Invoice cashier',{exact:true})).toHaveCount(0);await page.getByLabel('Search invoice number').fill('SEARCH-OTHER-CASHIER');await page.getByRole('button',{name:'Search invoices',exact:true}).click();await expect(page.getByText('No invoices match these filters.')).toBeVisible();
+ await page.getByLabel('Search invoice number').fill('SEARCH-OLDEST-ARCHIVE');await page.getByRole('button',{name:'Search invoices',exact:true}).click();await expect(page.locator('.invoice-history tbody')).toContainText('SEARCH-OLDEST-ARCHIVE');
+});
+
+
+test('admin controls cashier activation and password resets without deleting historical sales',async({page,browser,request})=>{
+ test.setTimeout(90000);
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json(),headers={Authorization:`Bearer ${admin.token}`};
+ const cashier=await provisionCashier(request,headers,'Cashier Controls','cashier-controls@test.local'),cashHeaders={Authorization:`Bearer ${cashier.token}`};
+ const users=await (await request.get('/api/users',{headers})).json(),target=users.find(u=>u.email==='cashier-controls@test.local'),adminId=users.find(u=>u.email==='admin@test.local')._id;
+ const endpoint='/api/users/'+target._id;
+ expect((await request.post(endpoint+'/status',{data:{active:false}})).status()).toBe(401);
+ expect((await request.post(endpoint+'/status',{headers:cashHeaders,data:{active:false}})).status()).toBe(403);
+ expect((await request.post(endpoint+'/reset-access',{headers:cashHeaders,data:{temporaryPassword:'ResetControl123!'}})).status()).toBe(403);
+ expect((await request.post('/api/users/'+adminId+'/status',{headers,data:{active:false}})).status()).toBe(404);
+ expect((await request.post('/api/users/'+adminId+'/reset-access',{headers,data:{temporaryPassword:'ResetControl123!'}})).status()).toBe(404);
+ expect((await request.post(endpoint+'/status',{headers,data:{active:'false'}})).status()).toBe(400);
+ expect((await request.post(endpoint+'/reset-access',{headers,data:{temporaryPassword:'short'}})).status()).toBe(400);
+ expect((await request.post(endpoint+'/reset-access',{headers,data:{temporaryPassword:'TestPassword123!'}})).status()).toBe(400);
+ const branch=await (await request.post('/api/stores',{headers,data:{name:'Account Controls Branch',location:'Lahore'}})).json();
+ await request.post('/api/profile/store',{headers:cashHeaders,data:{storeId:branch._id}});
+ const product=await (await request.post('/api/products',{headers,data:{storeId:branch._id,name:'Account control biscuits',barcode:'ACCOUNT-CONTROL-BISCUITS',price:10,stock:10}})).json();
+ const invoice=await (await request.post('/api/invoices',{headers:cashHeaders,data:{storeId:branch._id,items:[{productId:product._id,quantity:1}],payment:'Cash'}})).json();expect(invoice.total).toBe(10);
+ const cashPage=await browser.newPage();await cashPage.goto('/');await cashPage.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),cashier);await cashPage.reload();await expect(cashPage.locator('.connection')).toContainText('Connected workspace');await expect(cashPage.locator('.workspace-store')).toContainText(branch.name);
+ await cashPage.getByRole('button',{name:'Billing station',exact:true}).click();await cashPage.getByRole('textbox',{name:'Barcode',exact:true}).fill(product.barcode);await cashPage.getByRole('button',{name:'Scan',exact:true}).click();await expect(cashPage.locator('.cart-row')).toHaveCount(1);
+ await page.goto('/');await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),admin);await page.reload();await page.getByRole('button',{name:'Team & access',exact:true}).click();const row=page.locator('tr').filter({hasText:'cashier-controls@test.local'});await expect(row).toContainText('Active');
+ await row.getByRole('button',{name:'Deactivate Cashier Controls',exact:true}).click();await page.getByRole('dialog',{name:'Deactivate cashier'}).getByRole('button',{name:'Cancel',exact:true}).click();expect((await request.get('/api/profile',{headers:cashHeaders})).ok()).toBe(true);
+ await row.getByRole('button',{name:'Deactivate Cashier Controls',exact:true}).click();await page.getByRole('button',{name:'Confirm deactivation',exact:true}).click();await expect(row).toContainText('Inactive');
+ expect((await request.get('/api/profile',{headers:cashHeaders})).status()).toBe(401);expect((await request.post('/api/scans',{headers:cashHeaders,data:{barcode:product.barcode}})).status()).toBe(401);
+ const denied=await request.post('/api/auth/login',{data:{email:'cashier-controls@test.local',password:'TestPassword123!'}});expect(denied.status()).toBe(403);expect((await denied.json()).code).toBe('ACCOUNT_INACTIVE');
+ await expect(cashPage.locator('.connection')).toContainText('Demo workspace',{timeout:15000});expect(await cashPage.evaluate(()=>localStorage.getItem('asp-session'))).toBeNull();await expect(cashPage.locator('.cart-row')).toHaveCount(0);
+ const history=await (await request.get('/api/invoices/search?q='+invoice.number,{headers})).json();expect(history.total).toBe(1);expect(history.invoices[0].cashierName).toBe('Cashier Controls');
+ await row.getByRole('button',{name:'Reset access for Cashier Controls',exact:true}).click();const reset=page.getByRole('dialog',{name:'Reset cashier access'});await expect(reset).toContainText('remain inactive');await reset.getByLabel('New temporary password',{exact:true}).fill('ControlTemporary123!');await reset.getByLabel('Confirm temporary password',{exact:true}).fill('ControlTemporary123!');await reset.getByRole('button',{name:'Assign temporary password',exact:true}).click();await expect(reset).toHaveCount(0);await expect(row).toContainText('Inactive');await expect(row).toContainText('Password change required');
+ expect((await request.post('/api/auth/login',{data:{email:'cashier-controls@test.local',password:'ControlTemporary123!'}})).status()).toBe(403);
+ await row.getByRole('button',{name:'Reactivate Cashier Controls',exact:true}).click();await page.getByRole('button',{name:'Confirm reactivation',exact:true}).click();await expect(row.getByRole('button',{name:'Deactivate Cashier Controls',exact:true})).toBeVisible();
+ expect((await request.get('/api/profile',{headers:cashHeaders})).status()).toBe(401);expect((await request.post('/api/auth/login',{data:{email:'cashier-controls@test.local',password:'TestPassword123!'}})).status()).toBe(401);
+ await cashPage.getByRole('button',{name:'Close dialog',exact:true}).click();await cashPage.getByRole('button',{name:'Sign in',exact:true}).click();await cashPage.getByLabel('Email',{exact:true}).fill('cashier-controls@test.local');await cashPage.getByLabel('Password',{exact:true}).fill('ControlTemporary123!');await cashPage.locator('.modal').getByRole('button',{name:'Sign in',exact:true}).click();await expect(cashPage.getByRole('heading',{name:'Choose your new password'})).toBeVisible();
+ const temporary=await cashPage.evaluate(()=>JSON.parse(localStorage.getItem('asp-session')));expect((await request.get('/api/products',{headers:{Authorization:`Bearer ${temporary.token}`}})).status()).toBe(403);
+ await cashPage.getByLabel('Temporary password',{exact:true}).fill('ControlTemporary123!');await cashPage.getByLabel('New password',{exact:true}).fill('ControlPermanent123!');await cashPage.getByLabel('Confirm new password',{exact:true}).fill('ControlPermanent123!');await cashPage.getByRole('button',{name:'Save new password',exact:true}).click();await expect(cashPage.getByRole('heading',{name:'Choose your new password'})).toHaveCount(0);
+ const renewed=await cashPage.evaluate(()=>JSON.parse(localStorage.getItem('asp-session'))),renewedHeaders={Authorization:`Bearer ${renewed.token}`};expect(renewed.user.selectedStore._id).toBe(branch._id);expect((await request.get('/api/products',{headers:renewedHeaders})).ok()).toBe(true);
+ await request.post('/api/auth/password-reset-request',{data:{email:'cashier-controls@test.local'}});const pending=await (await request.get('/api/admin/password-resets',{headers})).json();expect(pending.some(r=>r.email==='cashier-controls@test.local')).toBe(true);
+ const resetAgain=await request.post(endpoint+'/reset-access',{headers,data:{temporaryPassword:'ControlSecondTemp123!'}});expect(resetAgain.ok()).toBe(true);expect(JSON.stringify(await resetAgain.json())).not.toContain('ControlSecondTemp123!');expect((await request.get('/api/profile',{headers:renewedHeaders})).status()).toBe(401);expect((await (await request.get('/api/admin/password-resets',{headers})).json()).some(r=>r.email==='cashier-controls@test.local')).toBe(false);
+ const afterHistory=await (await request.get('/api/invoices/search?q='+invoice.number,{headers})).json();expect(afterHistory.invoices[0]).toEqual(history.invoices[0]);
+ const logs=await (await request.get('/api/admin/login-logs',{headers})).json();expect(logs.logs.some(log=>log.action==='Cashier deactivated'&&log.performedByName==='Test Admin')).toBe(true);expect(JSON.stringify(logs)).not.toContain('ControlTemporary123!');expect(JSON.stringify(logs)).not.toContain('ControlSecondTemp123!');
+ const report=await (await request.get('/api/admin/store-reports/'+branch._id+'/activity',{headers})).json();expect(report.rows.some(r=>r.action==='Cashier access reset'&&r.actorName==='Test Admin')).toBe(true);
+ await cashPage.close();
 });
