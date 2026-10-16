@@ -9,7 +9,7 @@
     "client": "vite --host 127.0.0.1",
     "build": "vite build",
     "start": "node server/index.js",
-    "test": "node --test server/billing.test.js",
+    "test": "node --test server/billing.test.js server/rtsp.test.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {
