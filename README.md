@@ -4,7 +4,7 @@
 
 React | Express | Node.js | MongoDB | Barcode & QR scanning | PKR
 
-![Aspire AI Billing dashboard](docs/screenshots/dashboard.png)
+![Aspire AI Billing dashboard](docs/screenshots/dashboard-overview.png)
 
 ## Features
 
