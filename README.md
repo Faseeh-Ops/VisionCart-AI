@@ -74,3 +74,83 @@ See [model download preparation](models/README.md) for verified official YOLO26,
 The UI's `scan` function resolves a detection into a catalog product, then the shared `add` function updates the bill. A future detector can supply a barcode/catalog ID through this boundary, with confidence and confirmation added before `add`. Invoice price validation and inventory transactions stay on the server regardless of detection provider.
 
 Before public deployment, add auth rate limiting, account recovery, store-specific authorization, deployment hardening, and business tax rules. Reporting includes dashboard totals, a seven-day sales chart, and invoice history.
+
+
+## RTSP network cameras
+
+Signed-in cashiers can select **Billing station > Connect RTSP camera**. Administrators can use the same option in **Scan into inventory**. Enter the manufacturer-provided stream URL, for example `rtsp://192.168.1.50:554/stream1`, or a URL with camera credentials if required. The stream path varies by camera. The backend computer must be able to reach that camera IP; a browser cannot play RTSP directly.
+
+The local FFmpeg bridge converts RTSP over TCP to JPEG frames, which the existing barcode decoder scans. This is a barcode-scanning feature, not AI product recognition. Sessions are per account, stop on disconnect and expire after inactivity. URLs are held in memory for the connection, never saved in MongoDB or browser storage; credentials are not returned in errors.
+
+For a fresh checkout, install FFmpeg and set `FFMPEG_PATH` to its executable, or install the bundled Windows executable in the ignored local tools directory:
+
+```powershell
+python -m pip install imageio-ffmpeg --target .tools/rtsp-dependencies
+```
+
+RTSP currently accepts IPv4 camera addresses. Reachable network cameras with supported RTSP codecs can be tested; HTTP/MJPEG streams and devices without RTSP are not supported by this option. One connection is allowed per account, with four concurrent connections per server. Real-camera compatibility requires testing with the actual device; unit tests simulate frame delivery.
+
+Cashiers no longer see **Team & access** in navigation or **Add product** in the catalogue. Their **Profile & photo**, including working-store selection, remains available from the avatar menu.
+
+
+## Automatic barcode and QR detection
+
+Webcam, RTSP and uploaded-photo scanners automatically decode EAN/UPC/Code 128 and supported barcode formats alongside QR codes; no manual format switch is needed. The result identifies the detected format. Photo retries decode canvases directly rather than repeatedly encoding and loading PNG images.
+
+QR content must exactly match the product's inventory code (the existing barcode field, up to 128 characters). For example, a QR containing `8697449918281` matches the Mahmood coffee entry. A QR with an unrelated website URL is an unverified code: the app does not open links or use QR content as a price. Administrators can register a short custom QR value as a product code through the existing inventory workflow. Typed/USB input does not provide reliable format metadata and is marked as entered code. Sales-scan records preserve supplied decoder format metadata; this is informational and does not alter server-controlled prices.
+
+
+## Cashier password recovery
+
+On the sign-in dialog, select **Forgot password?** and submit the cashier email. The response is generic to protect account existence. Existing cashier accounts generate one pending request each; duplicate pending requests are combined. Administrator accounts cannot use this public cashier-recovery flow. Requests are rate-limited by connection IP.
+
+Administrators review **Password requests** in their sidebar, confirm the cashier?s identity, then assign a new temporary password. The request is resolved atomically with the password update. Existing cashier tokens are invalidated, password hashes are stored, and an audit event is recorded without the password. The admin must share the temporary password privately; no email or SMS is sent automatically. The cashier signs in with that temporary password and must replace it through the existing first-login password screen before using the application. Submitting a request alone never changes an account password.
+
+Pending cashier password requests also appear in the administrator notification bell with a count, cashier name/email and a review link. The shared pending list refreshes every five seconds, on window focus and when opening the bell. Resolving a request removes it from the badge and list.
+
+
+### Inventory by store
+
+Product names, barcodes, prices and discounts are shared across branches. Quantities are stored separately in `storeinventories`, with one unique record per store/product pair.
+
+- Admins choose **Inventory store** before viewing quantities, editing stock or using **Scan into inventory**. Product details and price edits apply to every branch; the stock field updates only the selected branch.
+- Cashiers see and sell stock from their saved **Working store**. Switching stores clears the unfinished bill and reloads inventory. Sales validate and deduct branch stock in the same MongoDB transaction as the invoice.
+- New branches start with zero stock. Select the branch and restock an existing barcode to supply it. Inactive branches retain their stock but cannot be restocked or used for sales.
+- On the first upgraded startup, an atomic, one-time migration assigns the existing shared stock to the original main branch (`000000000000000000000001`). Other branches start at zero; the old global quantity is cleared after migration. Historical invoices remain unchanged. The `store-inventory-v1` setup marker prevents stock being copied again on restart.
+- Restock request IDs are bound to their branch, product, quantity and administrator, so retrying a request cannot duplicate stock or apply it to a different branch.
+
+Before upgrading a running deployment, stop the old backend to avoid simultaneous writes to the old shared stock fields. Back up the database before starting the upgraded backend. Existing branch allocation cannot be inferred from the former shared quantity; assign opening stock for other branches using the administrator inventory controls.
+
+Inventory verification commands (MongoDB replica set must be running):
+
+```powershell
+node scripts/backup-inventory.js
+node scripts/test-store-migration.js
+npx playwright test -g "inventory is isolated"
+```
+
+The backup contains product/store quantities, not user passwords, and is saved under ignored `.tools/backups/`. The migration check uses a temporary `aspire_test_*` database and removes only that test database afterward.
+
+
+### Allocate stock between branches
+
+Admins can click **Allocate stock between stores** below the inventory store selector. Choose the source store, destination store, product and quantity, review the resulting balances and click **Transfer stock**. Reverse the two stores to return stock. Both branches must be active. A transfer deducts from the source and credits the destination in one transaction; it cannot create stock or overdraw the source. Retrying an identical request does not duplicate the allocation. Recent transfer history records the product, branches, units, administrator and date. Cashiers cannot access allocation endpoints.
+
+
+### Admin store details and downloads
+
+Open **Stores > View details** or **Store details** in the administrator menu. Each store report includes its complete product catalog, current quantities, prices, discounts and retail stock value. The activity feed records individual sale lines with cashier, exact Pakistan time, units, amount and invoice number; it also shows scans, store changes, store-linked account events, manual inventory edits, restocks and transfers. Transfers appear as outgoing and incoming activity at the respective branches.
+
+Filter activity by account and date. **Download inventory CSV** exports the current full branch catalog; **Download activity CSV** exports all matching events, across every page. Inventory is a current snapshot, not historical stock at the chosen dates. Sales and transfer history use existing records; scans/account activity/manual edits without an original store ID cannot be reconstructed and only become branch-specific from this update. Events record application actions rather than physical attendance. Only administrators can access the detail, activity and export APIs. CSV fields are quoted and spreadsheet formula prefixes are neutralized.
+
+
+### Invoice search and reprinting
+
+The **Invoices** page supports full or partial invoice-number search (case insensitive), cashier selection for admins, store selection, and inclusive Pakistan-time date ranges. Click **Search invoices** to apply any combination, or **Reset filters** to clear them. Results are paginated in groups of 25 and search the full database, including receipts older than the recent 100 used by the dashboard. Branch/cashier filter choices come from historical receipts, retaining closed branches and former cashiers. Cashiers can search only their own invoices; changing query parameters cannot reveal another cashier's receipts. Select **View**, then **Print / Save PDF**, to reprint the original saved prices and discounts.
+
+
+### Cashier account controls
+
+Administrators can open **Team & access** to deactivate/reactivate cashiers or **Reset access** with a temporary password. Confirmation is required before changing access. Deactivation immediately blocks authenticated requests and new logins; existing tokens are revoked and stay invalid after reactivation. Open cashier workspaces check their session every 10 seconds and on window focus, clearing their local session and unfinished bill when access is revoked.
+
+Reset access revokes existing sessions, resolves pending password-reset requests, and requires the cashier to replace the temporary password before accessing billing. Resetting an inactive account keeps it inactive until an admin explicitly reactivates it. Existing accounts without an active flag remain active. User records, profile photos, saved store selection and historical invoices are retained. Administrator accounts cannot be changed through these cashier controls. Account actions record the responsible administrator in login logs and store activity; passwords are never included in responses or logs.
