@@ -1,6 +1,11 @@
 import {BrowserMultiFormatReader} from '@zxing/browser';
 import {BarcodeFormat,DecodeHintType} from '@zxing/library';
 
+export function scanDetails(result) {
+  const format=BarcodeFormat[result.getBarcodeFormat()]||'UNKNOWN';
+  return {format,label:format==='QR_CODE'?'QR code':'Barcode',text:result.getText()};
+}
+
 export function createBarcodeReader() {
   const hints=new Map();
   hints.set(DecodeHintType.TRY_HARDER,true);
@@ -10,8 +15,7 @@ export function createBarcodeReader() {
 
 export function cameraConstraints(deviceId,devices=[]) {
   const virtual=/droidcam|iriun|virtual|obs|camo/i.test(devices.find(d=>d.deviceId===deviceId)?.label||'');
-  // Virtual drivers negotiate their own pixel format and resolution. Forcing
-  // HD capture can produce invalid frames on some phone-webcam drivers.
+  
   return {audio:false,video:{...(deviceId?{deviceId:{exact:deviceId}}:{facingMode:{ideal:'environment'}}),...(!virtual?{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}:{})}};
 }
 
@@ -46,9 +50,9 @@ export async function decodeBarcodePhoto(url) {
     const canvas=document.createElement('canvas');canvas.width=Math.round(angle%180?rh:rw);canvas.height=Math.round(angle%180?rw:rh);
     const ctx=canvas.getContext('2d');ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate(angle*Math.PI/180);
     ctx.drawImage(base,x,y,rw,rh,-rw/2,-rh/2,rw,rh);
-    try {return await reader.decodeFromImageUrl(canvas.toDataURL('image/png'));} catch {}
-    // Yield so photo retries don't freeze the interface.
+    try {return reader.decodeFromCanvas(canvas);} catch {}
+   
     await new Promise(resolve=>setTimeout(resolve,0));
   }
-  throw new Error('Barcode could not be decoded. Try a sharp photo without glare, or enter the printed number.');
+  throw new Error('No barcode or QR code could be decoded. Try a sharp photo without glare, or enter the product code.');
 }
