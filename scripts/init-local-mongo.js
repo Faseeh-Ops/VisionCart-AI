@@ -1,3 +1,4 @@
+
 import mongoose from 'mongoose';
 try {
   await mongoose.connect('mongodb://127.0.0.1:27017/aspire_billing?directConnection=true', {serverSelectionTimeoutMS:15000});
@@ -17,3 +18,4 @@ try {
   console.log('Local replica set is initialized and writable.');
 } catch (error) {console.error(error.message);process.exitCode=1;}
 finally {await mongoose.disconnect();}
+
