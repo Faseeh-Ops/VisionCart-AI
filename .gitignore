@@ -9,6 +9,14 @@ models/siglip2/
 models/qwen/
 models/product-pilot/.ultralytics/
 .venv-ai/
+.venv-train-gpu/
+datasets/product-detector/
+models/runs/
+models/retail-detector/
 .tools/
 __pycache__/
 *.pyc
+
+# Generated retailer snapshots and third-party photos stay local.
+/datasets/retail-catalog/*
+!/datasets/retail-catalog/README.md
