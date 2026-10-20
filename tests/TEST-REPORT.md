@@ -1,5 +1,7 @@
 # Aspire AI Billing test report
 
+Historical report from 16 October 2026. For the maintained release checks and current AI results, see [verification and evaluation](../docs/MODEL-EVALUATION.md).
+
 Date: 16 October 2026, Asia/Karachi.
 
 ## Final results
@@ -48,10 +50,10 @@ Prices and initial stock are controlled test fixtures, not live retailer values.
 Generated locally:
 
 - [Playwright HTML report](../playwright-report/index.html)
-- [Tiger inventory screenshot](../test-results/pakistani-tiger-inventory.png)
-- [Tiger barcode screenshot](../test-results/pakistani-tiger-barcode.png)
-- [Tiger QR screenshot](../test-results/pakistani-tiger-qr.png)
-- [Tiger invoice screenshot](../test-results/pakistani-tiger-invoice.png)
+- Local inventory screenshot: `test-results/pakistani-tiger-inventory.png`
+- Local barcode screenshot: `test-results/pakistani-tiger-barcode.png`
+- Local QR screenshot: `test-results/pakistani-tiger-qr.png`
+- Local invoice screenshot: `test-results/pakistani-tiger-invoice.png`
 
 Generated reports and screenshots are ignored by Git and may be replaced on the next test run.
 

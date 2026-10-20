@@ -78,7 +78,7 @@ Backups are written to the ignored `.tools/backups/` folder and exclude user cre
 python -m pip install imageio-ffmpeg --target .tools/rtsp-dependencies
 ```
 
-- The backend converts RTSP video into JPEG frames for barcode/QR decoding.
+- The backend converts RTSP video into JPEG frames. The main cashier RTSP entry uses AI product recognition; Barcode / QR RTSP camera is the separate printed-code backup. Capture waits for a decoded frame.
 - Camera credentials stay in memory and are not returned in error messages.
 - Sessions expire after inactivity; limits are one per account and four per server.
 - Focus, distance, lighting and the printed code determine real-camera decoding quality.
@@ -115,7 +115,7 @@ node scripts/capture-readme.mjs
 ## Current scope
 
 - Barcode/QR checkout, branch inventory, receipts, reporting and account controls are implemented.
-- AI product recognition and Odoo integration are future work.
+- Local single-product AI recognition is implemented with cashier confirmation. Multi-product detection and Odoo/eAsasa integration remain future work.
 - Cash/card selections record a payment method; they do not process transactions.
 - Tax calculation is not configured.
 - Before external deployment, review authentication limits, network access, backups and deployment security.

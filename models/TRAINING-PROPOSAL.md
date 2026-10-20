@@ -1,5 +1,7 @@
 # Aspire AI Billing: Pakistani product recognition and pricing proposal
 
+This is the original planning document. Current recognition features and the experimental trained checkpoint are described in [AI recognition](../docs/AI-RECOGNITION.md), [GPU training](../docs/GPU-DETECTOR-TRAINING.md), and [evaluation results](../docs/MODEL-EVALUATION.md).
+
 ## Executive proposal
 
 Begin with a pilot of 5–10 exact Pakistani grocery products. YOLO locates items in camera images; SigLIP2 compares each detected crop with reference photos linked to inventory products. The cashier confirms matches, and the backend retrieves current prices from MongoDB. Recognition models should identify products, not learn or generate their prices.
@@ -67,7 +69,7 @@ train: images/train
 val: images/val
 test: images/test
 names:
-  0: retail_product-
+  0: retail_product
 ```
 
 After installing the AI dependencies and preparing the labelled dataset, run from the project folder:

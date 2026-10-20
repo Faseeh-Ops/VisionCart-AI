@@ -1,6 +1,6 @@
-# Local AI model preparation
+# Local AI recognition
 
-YOLO26n and SigLIP2 weights have been downloaded locally, but the app does not load them yet. This directory stays inside **VisionCart AI**. See [the training and pricing proposal](TRAINING-PROPOSAL.md) for a plan that can be shared with management.
+The app now loads local YOLO26n and SigLIP 2 weights through a persistent Python worker when AI reference photos or recognition are first used. See [AI setup and use](../docs/AI-RECOGNITION.md) and the [training and pricing proposal](TRAINING-PROPOSAL.md).
 
 Recommended initial experiment: a product detector plus a catalog image encoder. The detector crops items, and the encoder compares those crops with labeled reference photos of each exact SKU. Generic pretrained models are not a ready-made Pakistani grocery SKU recognizer. Their suitability must be measured on your actual products, lighting, camera, quantities, and overlapping items; detector fine-tuning may be necessary.
 
@@ -22,4 +22,8 @@ These only download files. They do not install the inference stack or activate A
 
 Collect labeled photos of each product and pack size from several angles as an initial reference set. For example, Pepsi 500 ml and Pepsi 1.5 litre need separate catalog entries. Reference images, a measured rejection threshold, and cashier confirmation are essential for ambiguous matches. Similarity scores must not be presented as calibrated confidence percentages without validation.
 
-The planned integration is: camera frames -> local Python inference service -> catalog product IDs and candidate scores -> cashier confirmation -> existing Express invoice and inventory APIs. Prices must always come from MongoDB, never from generated AI text. Adding a product through barcode inventory scanning currently stores its barcode and catalog details; it does not train an AI model or add a visual reference automatically.
+The implemented path is: one product photo or captured frame -> local Python worker -> SigLIP reference matching -> MongoDB product IDs and current branch stock -> cashier confirmation -> existing invoice API. Admins attach reference photos through **Products > AI photos**. Indexing reference photos does not fine-tune model weights.
+
+YOLO runs and returns diagnostic boxes. Its generic packet detections failed the pilot, so the current recognizer uses the whole single-product image instead of treating person/tie/donut boxes as product crops. Calibrated multi-product mode instead uses foreground components, batches their crops through SigLIP, and reviews each region separately. Prices always come from MongoDB.
+
+An experimental one-class YOLO candidate was trained on 900 synthetic scenes using an RTX 4050. Its weights remain local under `models/retail-detector/candidate.pt` and are not automatically loaded into billing. See [GPU setup and training](../docs/GPU-DETECTOR-TRAINING.md) and [measured evaluation](../docs/MODEL-EVALUATION.md).
