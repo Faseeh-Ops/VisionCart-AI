@@ -19,7 +19,9 @@ export default function useCameras() {
   const automatic=devices.find(isExternalCamera);
   const deviceId=selected?.deviceId||automatic?.deviceId||'';
   const select=value=>{setPreference(value);try{localStorage.setItem('asp-camera-device',value);}catch{}};
-  return {devices,deviceId,preference: selected?preference:'',select,refresh,automatic};
+  useEffect(()=>{const sync=event=>setPreference(event.detail||'');window.addEventListener('asp-camera-preference',sync);return()=>window.removeEventListener('asp-camera-preference',sync);},[]);
+  const selectShared=value=>{select(value);window.dispatchEvent(new CustomEvent('asp-camera-preference',{detail:value}));};
+  return {devices,deviceId,preference: selected?preference:'',select:selectShared,refresh,automatic};
 }
 
 export function CameraPicker({cameras}) {

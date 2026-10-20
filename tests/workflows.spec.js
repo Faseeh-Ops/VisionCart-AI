@@ -5,6 +5,28 @@ import config from '../playwright.config.js';
 import {barcodeImage} from './barcode-fixture.js';
 import bcrypt from 'bcryptjs';
 
+test('logout keeps a large private catalog out of demo storage and returns without reloading',async({page,request})=>{
+ const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ await page.goto('/');await expect(page.locator('.connection')).toContainText('Demo workspace');
+ const original=await page.evaluate(()=>localStorage.getItem('asp-products-v2'));
+ const products=Array.from({length:1600},(_,i)=>({_id:i.toString(16).padStart(24,'0'),name:'Private live product '+i,barcode:'PRIVATE-'+i,price:10,stock:1,category:'x'.repeat(4096),verified:true}));
+ await page.route('**/api/products*',route=>route.fulfill({json:products}));
+ await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),admin);await page.reload();
+ await expect(page.locator('.connection')).toContainText('Connected workspace');await expect(page.getByText('1600',{exact:true}).first()).toBeVisible();
+ await page.getByRole('button',{name:'Open account menu'}).click();await page.getByRole('button',{name:'Log out',exact:true}).click();
+ await expect(page.locator('.connection')).toContainText('Demo workspace');await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>localStorage.getItem('asp-session'))).toBeNull();
+ expect(await page.evaluate(()=>localStorage.getItem('asp-products-v2'))).toBe(original);expect(errors).toEqual([]);
+});
+
+test('demo remains usable when browser storage is full',async({page})=>{
+ const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.addInitScript(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(['asp-products-v2','asp-invoices','asp-unknown'].includes(key))throw new DOMException('Storage full','QuotaExceededError');return original.call(this,key,value);};});
+ await page.goto('/');await expect(page.locator('.connection')).toContainText('Demo workspace');await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeVisible();
+ await expect(page.getByText('Demo changes could not be saved in this browser.')).toBeVisible();expect(errors).toEqual([]);
+});
+
 async function provisionCashier(request,adminHeaders,name,email) {
  const created=await request.post('/api/users/cashiers',{headers:adminHeaders,data:{name,email,password:'Temporary123!'}});expect(created.status()).toBe(201);
  const temporary=await (await request.post('/api/auth/login',{data:{email,password:'Temporary123!',role:'cashier'}})).json();expect(temporary.user.mustChangePassword).toBe(true);
@@ -296,14 +318,15 @@ test('automatically identifies QR photos and rejects unregistered QR links',asyn
  await expect(page.locator('.detection-result')).toContainText('Unverified product');await expect(page.locator('.cart-row')).toHaveCount(1);await expect(page).toHaveURL(/#\/billing/);
 });
 test('RTSP frames automatically identify and bill a matching QR code once',async({page,request})=>{
- const account=await (await request.post('/api/auth/login',{data:{email:'newcashier@test.local',password:'CashierNew123!'}})).json();
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ const account=await provisionCashier(request,{Authorization:`Bearer ${admin.token}`},'RTSP Test Cashier','rtsp-cashier@test.local');
  await page.goto('/');await page.evaluate(account=>localStorage.setItem('asp-session',JSON.stringify(account)),account);await page.goto('/#/billing');await page.reload();
  // Camera transport is mocked; actual QR decoding runs against the image.
  const qr=await qrPhoto(page,'ASPIRE-LAYS-52');
  await page.route('**/api/cameras/rtsp/connect',route=>route.fulfill({status:201,json:{id:'qr-test'}}));
  await page.route('**/api/cameras/rtsp/qr-test/frame',route=>route.fulfill({contentType:'image/png',body:qr}));
  await page.route('**/api/cameras/rtsp/qr-test/disconnect',route=>route.fulfill({json:{success:true}}));
- await page.getByRole('button',{name:'Connect RTSP camera',exact:true}).click();await page.getByLabel('RTSP camera address').fill('rtsp://192.168.1.50/stream');await page.getByRole('button',{name:'Connect RTSP camera',exact:true}).last().click();
+ await page.getByRole('button',{name:'Barcode / QR RTSP camera',exact:true}).click();await page.getByLabel('RTSP camera address').fill('rtsp://192.168.1.50/stream');await page.getByRole('button',{name:'Connect RTSP camera',exact:true}).last().click();
  await expect(page.locator('.cart-row')).toHaveCount(1);await expect(page.locator('.detection-result')).toContainText('QR code (QR_CODE)');
  await page.getByRole('button',{name:'Use webcam instead'}).click();await expect(page.locator('.cart-row')).toHaveCount(1);
 });

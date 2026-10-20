@@ -1,4 +1,5 @@
 import {accountControlsRouter} from './account-controls.js';
+import {aiRecognitionRouter} from './ai-recognition.js';
 import {invoiceSearchRouter} from './invoice-search.js';
 import {storeReportsRouter} from './store-reports.js';
 import 'dotenv/config';
@@ -13,11 +14,11 @@ import {starterProducts} from '../shared/catalog.js';
 import {dateRange,reportPage} from './reports.js';
 import {validatePhoto} from './profile-photo.js';
 import {rtspRouter} from './rtsp.js';
-const app=express(); app.use(express.json({limit:'400kb'}));
+const app=express(); app.use(express.json({limit:'800kb'}));
 const DEFAULT_STORE_ID='000000000000000000000001';
 const Store=mongoose.model('Store',new mongoose.Schema({name:{type:String,required:true,trim:true,maxLength:100},location:{type:String,required:true,trim:true,maxLength:150},code:{type:String,unique:true,required:true},active:{type:Boolean,default:true}},{timestamps:true}));
 const User=mongoose.model('User',new mongoose.Schema({name:String,email:{type:String,unique:true},password:String,active:{type:Boolean,default:true},mustChangePassword:{type:Boolean,default:false},tokenVersion:{type:Number,default:0},photo:{type:String,default:null},selectedStore:{type:mongoose.Schema.Types.ObjectId,ref:'Store',default:DEFAULT_STORE_ID},role:{type:String,enum:['admin','cashier'],default:'cashier'},createdBy:{type:mongoose.Schema.Types.ObjectId,ref:'User'}}));
-const Product=mongoose.model('Product',new mongoose.Schema({name:{type:String,required:true},barcode:{type:String,unique:true,required:true},price:{type:Number,min:0,required:true},stock:{type:Number,min:0,default:0},category:String,emoji:String,discountPercent:{type:Number,min:0,max:100,default:0},verified:{type:Boolean,default:true}}));
+const Product=mongoose.model('Product',new mongoose.Schema({name:{type:String,required:true},barcode:{type:String,unique:true,required:true},price:{type:Number,min:0,required:true},stock:{type:Number,min:0,default:0},category:String,emoji:String,barcodeKind:String,catalogImportKey:String,retailImportedAt:Date,retailSources:[{listingId:String,store:String,url:String,currency:String,regularPrice:Number,scrapedAt:Date}],discountPercent:{type:Number,min:0,max:100,default:0},verified:{type:Boolean,default:true}}));
 // Product details are shared; quantities belong exclusively to a branch.
 const inventorySchema=new mongoose.Schema({storeId:{type:mongoose.Schema.Types.ObjectId,ref:'Store',required:true},productId:{type:mongoose.Schema.Types.ObjectId,ref:'Product',required:true},stock:{type:Number,min:0,required:true}},{timestamps:true});
 inventorySchema.index({storeId:1,productId:1},{unique:true});
@@ -83,6 +84,7 @@ app.post('/api/admin/password-resets/:id/resolve',async(req,res)=>{
 });
 app.use('/api/users',accountControlsRouter({User,AuthLog,StoreEvent,PasswordResetRequest,validPassword}));
 app.use('/api/cameras/rtsp',rtspRouter());
+app.use('/api/ai',aiRecognitionRouter({Product,Store,Scan,branchProducts}));
 app.post('/api/auth/change-password',async(req,res)=>{
  const {currentPassword,newPassword}=req.body;
  if(typeof currentPassword!=='string'||!validPassword(newPassword))return res.status(400).json({error:'Use at least 8 characters and at most 72 UTF-8 bytes for your new password.'});
