@@ -112,7 +112,12 @@ flowchart LR
     API --> DB[(MongoDB replica set)]
     Browser -->|photo or camera frame| API
     API --> Worker[Persistent local Python worker]
-    Worker --> Encoder[SigLIP 2 image embeddings]
+    Worker --> Single[Single product: full image]
+    Worker --> Multi[Multiple products: calibrated counter segmentation]
+    Single --> Encoder[SigLIP 2 image embeddings]
+    Multi -->|product crops| Encoder
+    Worker --> YOLO[YOLO26n: single-image diagnostic boxes]
+    YOLO -.-> Diagnostics[Diagnostic metadata only]
     Encoder --> Match[Inventory reference matching]
     Match --> API
     RTSP[RTSP camera] --> Bridge[FFmpeg bridge]
@@ -120,7 +125,11 @@ flowchart LR
     API --> Review[Cashier review]
     Review --> Invoice[Invoice and branch stock transaction]
     Invoice --> DB
+    Training[Offline GPU training] -.-> Candidate[Fine-tuned retail YOLO candidate]
+    Candidate -.-> Evaluation[Synthetic evaluation: not active in billing]
 ```
+
+YOLO26n currently supplies diagnostic boxes for single-product requests; SigLIP 2 matches the full image in that mode. Multi-product requests use calibrated counter segmentation to produce crops for SigLIP 2. The separately fine-tuned YOLO candidate remains an offline experiment and is not connected to the billing detection path.
 
 MongoDB owns prices, discounts, stock, and invoice records. AI returns candidate product identities; it does not determine prices. Each region prediction is user/store-bound, expires, and can be confirmed only once.
 
