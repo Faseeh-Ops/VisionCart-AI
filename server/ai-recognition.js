@@ -4,9 +4,10 @@ import {createHash} from 'node:crypto';
 import {validatePhoto} from './profile-photo.js';
 import {aiAvailability,encodeProductPhoto} from './ai-runtime.js';
 import {makeReferenceIndex,rankReferenceProducts,validEmbedding} from './ai-index.js';
+import {cleanImageSearch,downloadOpenFoodFactsImage,imageSearchTerms,searchOpenFoodFacts} from './product-image-search.js';
 
 const MODEL='siglip2-base-patch16-224:image-v1';
-const referenceSchema=new mongoose.Schema({productId:{type:mongoose.Schema.Types.ObjectId,required:true,ref:'Product'},photo:String,embedding:[Number],model:String,hash:String,createdBy:String},{timestamps:true});
+const referenceSchema=new mongoose.Schema({productId:{type:mongoose.Schema.Types.ObjectId,required:true,ref:'Product'},photo:String,embedding:[Number],model:String,hash:String,createdBy:String,sourceProvider:String,sourceUrl:String,sourceLabel:String},{timestamps:true});
 referenceSchema.index({productId:1,hash:1},{unique:true});
 const Reference=mongoose.models.AiReference||mongoose.model('AiReference',referenceSchema);
 const predictionSchema=new mongoose.Schema({user:String,storeId:String,candidates:[String],status:{type:String,default:'pending'},expiresAt:Date},{timestamps:true});
@@ -40,21 +41,50 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
     res.json({photos:Object.fromEntries(rows.map(row=>[String(row._id),row.photo]))});
   });
   const admin=(req,res,next)=>req.user.role==='admin'?next():res.status(403).json({error:'Only administrators can manage AI reference photos.'});
+  const addReference=async({productId,photo,userId,sourceProvider='upload',sourceUrl='',sourceLabel='Admin upload'})=>{
+    const hash=createHash('sha256').update(photo).digest('hex');
+    const old=await Reference.findOne({productId,hash}).select('photo model createdAt sourceProvider sourceUrl sourceLabel');
+    if(old)return old;
+    if(await Reference.countDocuments({productId})>=8)throw bad('Keep up to eight reference photos for each exact product size.');
+    const encoded=await encodeProductPhoto(photo);
+    if(encoded.model!==MODEL||!validEmbedding(encoded.embedding))throw bad('AI returned an invalid image embedding.',503);
+    const reference=await Reference.create({productId,photo,hash,model:MODEL,embedding:encoded.embedding,createdBy:userId,sourceProvider,sourceUrl,sourceLabel});
+    invalidateIndex();return reference;
+  };
   router.get('/products/:id/references',admin,async(req,res)=>{
     if(!mongoose.isValidObjectId(req.params.id))throw bad('Choose a valid product.');
-    res.json(await Reference.find({productId:req.params.id}).select('photo model createdAt').sort({createdAt:1}));
+    res.json(await Reference.find({productId:req.params.id}).select('photo model createdAt sourceProvider sourceUrl sourceLabel').sort({createdAt:1}));
   });
   router.post('/products/:id/references',admin,async(req,res)=>{
     if(!mongoose.isValidObjectId(req.params.id)||!await Product.exists({_id:req.params.id,verified:true}))throw bad('Verified product not found.',404);
-    const photo=photoInput(req.body.photo),hash=createHash('sha256').update(photo).digest('hex');
-    const old=await Reference.findOne({productId:req.params.id,hash}).select('photo model createdAt');
-    if(old)return res.json(old);
-    if(await Reference.countDocuments({productId:req.params.id})>=8)throw bad('Keep up to eight reference photos for each exact product size.');
-    const encoded=await encodeProductPhoto(photo);
-    if(encoded.model!==MODEL||!validEmbedding(encoded.embedding))throw bad('AI returned an invalid image embedding.',503);
-    const reference=await Reference.create({productId:req.params.id,photo,hash,model:MODEL,embedding:encoded.embedding,createdBy:req.user.id});
-    invalidateIndex();
+    const reference=await addReference({productId:req.params.id,photo:photoInput(req.body.photo),userId:req.user.id});
     res.status(201).json({_id:reference.id,photo:reference.photo,model:reference.model,createdAt:reference.createdAt});
+  });
+  router.get('/products/:id/image-suggestions',admin,async(req,res)=>{
+    if(!mongoose.isValidObjectId(req.params.id))throw bad('Choose a valid product.');
+    const product=await Product.findOne({_id:req.params.id,verified:true}).select('name barcode');if(!product)throw bad('Verified product not found.',404);
+    const query=cleanImageSearch(req.query.q)||product.name,terms=imageSearchTerms(query),conditions=terms.map(term=>({name:new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i')}));
+    const similar=conditions.length?await Product.find({_id:{$ne:product._id},verified:true,$or:conditions}).select('name barcode retailSources').limit(24).lean():[];
+    const ids=similar.map(row=>row._id),photos=ids.length?await Reference.aggregate([{$match:{productId:{$in:ids}}},{$sort:{createdAt:1,_id:1}},{$group:{_id:'$productId',referenceId:{$first:'$_id'},photo:{$first:'$photo'}}}]):[];
+    const photoByProduct=new Map(photos.map(row=>[String(row._id),row]));
+    const local=similar.map(row=>{const reference=photoByProduct.get(String(row._id));if(!reference)return null;const score=imageSearchTerms(row.name).filter(term=>terms.includes(term)).length;return {provider:'catalog',referenceId:String(reference.referenceId),name:row.name,details:`Existing catalog product · ${row.barcode}`,imageUrl:reference.photo,sourceUrl:row.retailSources?.[0]?.url||'',sourceLabel:'Aspire product library',score};}).filter(Boolean).sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name)).slice(0,2).map(({score,...row})=>row);
+    let external=[],externalError='';
+    try{external=await searchOpenFoodFacts({query,barcode:product.barcode,limit:4,userAgent:process.env.OPEN_FOOD_FACTS_USER_AGENT});}catch(error){externalError=local.length?'Showing matches from your Aspire product library. Open Food Facts is temporarily unavailable.':'Open Food Facts is temporarily unavailable. Use Google Images or upload a photo from this device.';}
+    res.json({query,candidates:[...local,...external].slice(0,4),externalError,attribution:'Open Food Facts product images are offered under CC BY-SA. Confirm the exact pack before saving.'});
+  });
+  router.post('/products/:id/reference-from-suggestion',admin,async(req,res)=>{
+    if(!mongoose.isValidObjectId(req.params.id)||!await Product.exists({_id:req.params.id,verified:true}))throw bad('Verified product not found.',404);
+    let photo,sourceProvider,sourceUrl='',sourceLabel;
+    if(req.body.provider==='catalog'){
+      if(!mongoose.isValidObjectId(req.body.referenceId))throw bad('Choose a valid catalog suggestion.');
+      const source=await Reference.findById(req.body.referenceId).select('photo sourceProvider sourceUrl sourceLabel');if(!source)throw bad('The catalog suggestion is no longer available.',404);
+      photo=photoInput(source.photo);sourceProvider=source.sourceProvider||'catalog';sourceUrl=source.sourceUrl||'';sourceLabel=source.sourceLabel||'Aspire product library';
+    }else if(req.body.provider==='openfoodfacts'){
+      sourceProvider='openfoodfacts';sourceUrl=String(req.body.imageUrl||'');sourceLabel='Open Food Facts';
+      photo=photoInput(await downloadOpenFoodFactsImage(sourceUrl,{userAgent:process.env.OPEN_FOOD_FACTS_USER_AGENT}));
+    }else throw bad('Choose a product image suggestion.');
+    const reference=await addReference({productId:req.params.id,photo,userId:req.user.id,sourceProvider,sourceUrl,sourceLabel});
+    res.status(201).json({_id:reference.id,photo:reference.photo,model:reference.model,createdAt:reference.createdAt,sourceProvider:reference.sourceProvider,sourceUrl:reference.sourceUrl,sourceLabel:reference.sourceLabel});
   });
   router.post('/references/:id/remove',admin,async(req,res)=>{
     if(!mongoose.isValidObjectId(req.params.id))throw bad('Choose a valid reference photo.');
