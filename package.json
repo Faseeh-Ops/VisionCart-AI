@@ -9,7 +9,7 @@
     "client": "vite --host 127.0.0.1",
     "build": "vite build",
     "start": "node server/index.js",
-    "test": "node --test server/camera-cycle.test.js server/billing.test.js server/rtsp.test.js server/ai-index.test.js scripts/retail-import-plan.test.mjs scripts/retail-catalog-parsers.test.mjs",
+    "test": "node --test server/camera-cycle.test.js server/billing.test.js server/rtsp.test.js server/ai-index.test.js server/product-image-search.test.js scripts/retail-import-plan.test.mjs scripts/retail-catalog-parsers.test.mjs",
     "test:e2e": "playwright test",
     "test:ai": "playwright test --config=playwright.ai.config.js",
     "test:dataset": "playwright test --config=playwright.dataset.config.js",
