@@ -34,8 +34,8 @@ export function storeReportsRouter({Store,Product,StoreInventory,Invoice}){
    {$project:{account:0,catalog:0,branches:0}},{$sort:{createdAt:-1,_id:-1,action:1,product:1}}];
  };
  const inventory=async(req)=>{
-  const products=await Product.find().sort({name:1}).lean(),rows=await StoreInventory.find({storeId:req.reportStore._id}).lean(),map=new Map(rows.map(r=>[String(r.productId),r.stock]));
-  return products.map(p=>({productId:p._id,name:p.name,barcode:p.barcode,category:p.category||'',price:p.price,discountPercent:p.discountPercent||0,stock:map.get(String(p._id))||0}));
+  const products=await Product.find().sort({name:1}).lean(),rows=await StoreInventory.find({storeId:req.reportStore._id}).lean(),map=new Map(rows.map(r=>[String(r.productId),r]));
+  return products.map(p=>{const row=map.get(String(p._id));return {productId:p._id,name:p.name,barcode:p.barcode,category:p.category||'',price:p.price,discountPercent:Number.isFinite(row?.discountPercent)?row.discountPercent:(p.discountPercent||0),discountScope:Number.isFinite(row?.discountPercent)?'Store only':'All stores',stock:row?.stock||0};});
  };
  router.get('/:storeId/details',async(req,res)=>{
   const products=await inventory(req);
@@ -51,11 +51,11 @@ export function storeReportsRouter({Store,Product,StoreInventory,Invoice}){
   // Validate filters before sending headers, so invalid dates return a normal API error.
   const pipeline=kind==='activity'?activityPipeline(req):null;
   const rows=kind==='inventory'?await inventory(req):null;
-  const headers=kind==='inventory'?['Store','Product','Barcode','Category','Stock units','Price (Rs)','Discount (%)','Snapshot time (PKT)']:['Time (PKT)','Store','Account','Action','Product','Barcode','Quantity','Amount (Rs)','Details'];
+  const headers=kind==='inventory'?['Store','Product','Barcode','Category','Stock units','Price (Rs)','Discount (%)','Discount scope','Snapshot time (PKT)']:['Time (PKT)','Store','Account','Action','Product','Barcode','Quantity','Amount (Rs)','Details'];
   res.set({'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="store-${req.reportStore._id}-${kind}.csv"`});
   res.write('\uFEFF'+headers.map(csvCell).join(',')+'\r\n');
   const snapshot=pkt(new Date());
-  if(rows){for(const p of rows)res.write([req.reportStore.name,p.name,p.barcode,p.category,p.stock,p.price,p.discountPercent,snapshot].map(csvCell).join(',')+'\r\n');res.end();return;}
+  if(rows){for(const p of rows)res.write([req.reportStore.name,p.name,p.barcode,p.category,p.stock,p.price,p.discountPercent,p.discountScope,snapshot].map(csvCell).join(',')+'\r\n');res.end();return;}
   const cursor=Invoice.aggregate(pipeline).allowDiskUse(true).cursor({batchSize:100});
   try{for await(const row of cursor){if(res.destroyed)break;const line=[pkt(row.createdAt),req.reportStore.name,row.actorName,row.action,row.product,row.barcode,row.quantity,row.amount,row.details].map(csvCell).join(',')+'\r\n';if(!res.write(line))await new Promise(resolve=>{const done=()=>{res.off('drain',done);res.off('close',done);resolve();};res.once('drain',done);res.once('close',done);});}res.end();}finally{await cursor.close();}
  });
