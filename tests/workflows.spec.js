@@ -528,6 +528,27 @@ test('invoice search filters all receipts, respects cashier access and reprints 
 });
 
 
+test('admin controls company-wide and store-specific product discounts',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json(),headers={Authorization:`Bearer ${admin.token}`};
+ const cashier=await provisionCashier(request,headers,'Discount Cashier','discount-cashier@test.local'),cashHeaders={Authorization:`Bearer ${cashier.token}`};
+ const carefour=await (await request.post('/api/stores',{headers,data:{name:'Discount Carefour',location:'Lahore'}})).json(),imtiaz=await (await request.post('/api/stores',{headers,data:{name:'Discount Imtiaz',location:'Karachi'}})).json();
+ const product=await (await request.post('/api/products',{headers,data:{storeId:carefour._id,name:'Promotion biscuits',barcode:'PROMOTION-BISCUITS',price:100,stock:20,category:'Biscuits',discountPercent:10,discountScope:'all'}})).json();
+ const getProduct=async storeId=>(await (await request.get('/api/products?storeId='+storeId,{headers})).json()).find(item=>item._id===product._id);
+ expect(await getProduct(carefour._id)).toMatchObject({discountPercent:10,discountScope:'all',globalDiscountPercent:10,storeDiscountPercent:null});
+ expect(await getProduct(imtiaz._id)).toMatchObject({discountPercent:10,discountScope:'all'});
+ expect((await request.post('/api/products/'+product._id,{headers,data:{...product,storeId:carefour._id,stock:20,discountPercent:25,discountScope:'store'}})).ok()).toBe(true);
+ expect(await getProduct(carefour._id)).toMatchObject({discountPercent:25,discountScope:'store',globalDiscountPercent:10,storeDiscountPercent:25});
+ expect(await getProduct(imtiaz._id)).toMatchObject({discountPercent:10,discountScope:'all',storeDiscountPercent:null});
+ await request.post('/api/profile/store',{headers:cashHeaders,data:{storeId:carefour._id}});
+ const sale=await request.post('/api/invoices',{headers:cashHeaders,data:{storeId:carefour._id,items:[{productId:product._id,quantity:1}],payment:'Cash'}});expect(sale.ok(),await sale.text()).toBe(true);expect((await sale.json()).total).toBe(75);
+ expect((await request.post('/api/products/'+product._id,{headers,data:{...product,storeId:imtiaz._id,stock:0,discountPercent:15,discountScope:'all'}})).ok()).toBe(true);
+ expect(await getProduct(carefour._id)).toMatchObject({discountPercent:15,discountScope:'all',storeDiscountPercent:null});expect(await getProduct(imtiaz._id)).toMatchObject({discountPercent:15,discountScope:'all',storeDiscountPercent:null});
+ await page.goto('/');await page.evaluate(account=>localStorage.setItem('asp-session',JSON.stringify(account)),admin);await page.reload();await page.getByLabel('Inventory store').selectOption(carefour._id);await page.getByRole('button',{name:'Discounts',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Product discounts',exact:true})).toBeVisible();await page.getByLabel('Search discount products').fill('Promotion biscuits');await page.getByRole('button',{name:'Manage discount',exact:true}).click();await page.getByLabel('Discount percentage').fill('20');await page.getByLabel('Apply discount to').selectOption('store');await page.getByRole('button',{name:'Save discount',exact:true}).click();
+ await expect.poll(async()=>(await getProduct(carefour._id)).discountPercent).toBe(20);expect((await getProduct(imtiaz._id)).discountPercent).toBe(15);
+ await page.getByRole('button',{name:'Products',exact:true}).click();await page.getByRole('button',{name:'Scan into inventory',exact:true}).click();await expect(page.locator('.inventory-code')).toBeVisible();expect(await page.locator('.inventory-code').evaluate(element=>getComputedStyle(element,'::before').content)).toContain('USB scanner');await page.evaluate(()=>document.activeElement?.blur());await page.keyboard.type(product.barcode,{delay:10});await page.keyboard.press('Enter');await expect(page.locator('.inventory-details')).toContainText('Promotion biscuits');
+});
+
 test('admin controls cashier activation and password resets without deleting historical sales',async({page,browser,request})=>{
  test.setTimeout(90000);
  const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json(),headers={Authorization:`Bearer ${admin.token}`};
@@ -569,4 +590,17 @@ test('admin controls cashier activation and password resets without deleting his
  const logs=await (await request.get('/api/admin/login-logs',{headers})).json();expect(logs.logs.some(log=>log.action==='Cashier deactivated'&&log.performedByName==='Test Admin')).toBe(true);expect(JSON.stringify(logs)).not.toContain('ControlTemporary123!');expect(JSON.stringify(logs)).not.toContain('ControlSecondTemp123!');
  const report=await (await request.get('/api/admin/store-reports/'+branch._id+'/activity',{headers})).json();expect(report.rows.some(r=>r.action==='Cashier access reset'&&r.actorName==='Test Admin')).toBe(true);
  await cashPage.close();
+});
+
+test('admin can search and confirm a catalogue picture for a product',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ const picture='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+ let selected=false,selectionBody;
+ await page.route('**/api/ai/products/*/image-suggestions?*',route=>route.fulfill({json:{query:"Lay's Classic Salted",candidates:[{provider:'openfoodfacts',name:"Lay's Classic Salted 52 g",details:'Lay’s · 52 g',imageUrl:picture,sourceUrl:'https://world.openfoodfacts.org/product/example',sourceLabel:'Open Food Facts'}],attribution:'Open Food Facts product images are offered under CC BY-SA. Confirm the exact pack before saving.'}}));
+ await page.route('**/api/ai/products/*/reference-from-suggestion',async route=>{selectionBody=route.request().postDataJSON();selected=true;await route.fulfill({status:201,json:{_id:'000000000000000000000099',photo:picture,sourceLabel:'Open Food Facts'}});});
+ await page.route('**/api/ai/products/*/references',route=>route.fulfill({json:selected?[{_id:'000000000000000000000099',photo:picture,sourceLabel:'Open Food Facts'}]:[]}));
+ await page.goto('/');await page.evaluate(value=>localStorage.setItem('asp-session',JSON.stringify(value)),admin);await page.reload();
+ await page.getByRole('button',{name:'Products',exact:true}).click();const card=page.locator('.catalog-product').filter({hasText:'ASPIRE-LAYS-52'});await card.getByRole('button',{name:'AI photos',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Product pictures & AI photos'});await expect(dialog.getByText("Lay's Classic Salted 52 g",{exact:true})).toBeVisible();await expect(dialog.getByText('Open Food Facts',{exact:true})).toBeVisible();const browserSearch=dialog.getByRole('link',{name:'Search Google Images'});await expect(browserSearch).toHaveAttribute('target','_blank');await expect(browserSearch).toHaveAttribute('href',/google\.com\/search\?tbm=isch/);
+ await dialog.getByRole('button',{name:'Use this picture',exact:true}).click();await expect(dialog.getByText('1/8 saved pictures')).toBeVisible();expect(selectionBody.provider).toBe('openfoodfacts');expect(selectionBody.imageUrl).toBe(picture);
 });
