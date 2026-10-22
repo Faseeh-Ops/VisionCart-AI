@@ -9,7 +9,7 @@ export function scanDetails(result) {
 export function createBarcodeReader() {
   const hints=new Map();
   hints.set(DecodeHintType.TRY_HARDER,true);
-  hints.set(DecodeHintType.POSSIBLE_FORMATS,[BarcodeFormat.EAN_13,BarcodeFormat.EAN_8,BarcodeFormat.UPC_A,BarcodeFormat.UPC_E,BarcodeFormat.CODE_128,BarcodeFormat.CODE_39,BarcodeFormat.ITF,BarcodeFormat.QR_CODE]);
+  hints.set(DecodeHintType.POSSIBLE_FORMATS,[BarcodeFormat.EAN_13,BarcodeFormat.EAN_8,BarcodeFormat.UPC_A,BarcodeFormat.UPC_E,BarcodeFormat.CODE_128,BarcodeFormat.CODE_39,BarcodeFormat.ITF,BarcodeFormat.CODABAR,BarcodeFormat.QR_CODE,BarcodeFormat.DATA_MATRIX,BarcodeFormat.AZTEC,BarcodeFormat.PDF_417]);
   return new BrowserMultiFormatReader(hints,{delayBetweenScanAttempts:120,delayBetweenScanSuccess:400});
 }
 
@@ -43,7 +43,7 @@ export async function decodeBarcodePhoto(url) {
   const base=document.createElement('canvas');base.width=Math.round(image.width*scale);base.height=Math.round(image.height*scale);
   base.getContext('2d').drawImage(image,0,0,base.width,base.height);
   const w=base.width,h=base.height;
-  const regions=[[0,0,w,h],[w*.2,h*.3,w*.5,h*.4],[w*.25,h*.44,w*.4,h*.23],[w*.34,h*.30,w*.32,h*.39]];
+  const regions=[[0,0,w,h],[w*.12,h*.12,w*.76,h*.76],[0,0,w,h*.58],[0,h*.42,w,h*.58],[0,h*.18,w*.62,h*.64],[w*.38,h*.18,w*.62,h*.64],[w*.2,h*.3,w*.6,h*.4]];
   const reader=createBarcodeReader();
   for(const region of regions) for(const angle of [0,90,180,270]) {
     const [x,y,rw,rh]=region;
