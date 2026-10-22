@@ -50,7 +50,7 @@ def image_vectors(images):
         return F.normalize(pooled, dim=-1).tolist()
 
 
-def encode(photo, mode='single', background_photo=None):
+def encode(photo, mode='single', background_photo=None, purpose='query'):
     from scene_regions import product_regions, SceneError
     image = read_photo(photo)
     if mode == 'multiple':
@@ -68,9 +68,16 @@ def encode(photo, mode='single', background_photo=None):
             regions.append({'box': box, 'embedding': vector, 'photo': 'data:image/jpeg;base64,' + base64.b64encode(stream.getvalue()).decode()})
         return {'regions': regions, 'imageSize': list(image.size), 'model': 'siglip2-base-patch16-224:image-v1',
                 'localization': 'separated_counter_products', 'detector': 'calibrated_background_components', 'detections': []}
+    if purpose == 'reference':
+        return {'embedding': image_vectors([image])[0], 'model': 'siglip2-base-patch16-224:image-v1',
+                'localization': 'reference_image', 'detector': 'not_used', 'detections': []}
     detection = Detector.predict(image, device='cpu', conf=.25, imgsz=640, verbose=False)[0]
     boxes = [{'label': detection.names[int(b.cls.item())], 'score': float(b.conf.item()), 'xyxy': b.xyxy[0].tolist()} for b in detection.boxes]
-    return {'embedding': image_vectors([image])[0], 'model': 'siglip2-base-patch16-224:image-v1', 'localization': 'full_image_single_product', 'detector': 'yolo26n', 'detections': boxes}
+    width, height = image.size
+    margin_x, margin_y = round(width * .07), round(height * .07)
+    focused = image.crop((margin_x, margin_y, width - margin_x, height - margin_y))
+    vectors = image_vectors([focused, image])
+    return {'embedding': vectors[0], 'embeddings': vectors, 'model': 'siglip2-base-patch16-224:image-v1', 'localization': 'focused_and_full_image', 'detector': 'yolo26n', 'detections': boxes}
 
 
 def main():
@@ -86,7 +93,7 @@ def main():
         try:
             request = json.loads(line)
             with contextlib.redirect_stdout(sys.stderr):
-                result = encode(request['photo'], request.get('mode', 'single'), request.get('backgroundPhoto'))
+                result = encode(request['photo'], request.get('mode', 'single'), request.get('backgroundPhoto'), request.get('purpose', 'query'))
             print(json.dumps({'id': request['id'], 'result': result}), flush=True)
         except Exception as error:
             from scene_regions import SceneError
