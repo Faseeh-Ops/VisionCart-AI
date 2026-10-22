@@ -46,7 +46,7 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
     const old=await Reference.findOne({productId,hash}).select('photo model createdAt sourceProvider sourceUrl sourceLabel');
     if(old)return old;
     if(await Reference.countDocuments({productId})>=8)throw bad('Keep up to eight reference photos for each exact product size.');
-    const encoded=await encodeProductPhoto(photo);
+    const encoded=await encodeProductPhoto(photo,{purpose:'reference'});
     if(encoded.model!==MODEL||!validEmbedding(encoded.embedding))throw bad('AI returned an invalid image embedding.',503);
     const reference=await Reference.create({productId,photo,hash,model:MODEL,embedding:encoded.embedding,createdBy:userId,sourceProvider,sourceUrl,sourceLabel});
     invalidateIndex();return reference;
@@ -101,7 +101,8 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
     const encoded=await encodeProductPhoto(photo,{mode,backgroundPhoto});
     if(encoded.model!==MODEL)throw bad('AI returned an invalid model.',503);
     const makeCandidates=async embedding=>{
-    if(!validEmbedding(embedding))throw bad('AI returned an invalid image embedding.',503);
+    const queryEmbeddings=Array.isArray(embedding?.[0])?embedding:[embedding];
+    if(!queryEmbeddings.length||queryEmbeddings.length>3||queryEmbeddings.some(value=>!validEmbedding(value)))throw bad('AI returned an invalid image embedding.',503);
     const ranked=rankReferenceProducts(embedding,references),scores=new Map(ranked.map(r=>[r.productId,r.similarity])),bestReferences=new Map(ranked.map(r=>[r.productId,r.referenceId]));
     const details=[];
     // Read live prices and stock only for the best verified catalog candidates.
@@ -129,7 +130,7 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
       for(let i=0;i<candidates.length;i++)items.push({...await savePrediction(candidates[i]),box:encoded.regions[i].box,photo:encoded.regions[i].photo});
       return res.json({...common,items,imageSize:encoded.imageSize});
     }
-    res.json({...common,...await savePrediction(await makeCandidates(encoded.embedding))});
+    res.json({...common,...await savePrediction(await makeCandidates(encoded.embeddings||encoded.embedding))});
   });
   router.post('/confirm',async(req,res)=>{
     if(req.user.role!=='cashier')throw bad('Cashier access required.',403);
