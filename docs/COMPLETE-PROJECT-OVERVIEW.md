@@ -151,9 +151,9 @@ Internal `ASPIRE-...` and `RETAIL-...` identifiers are not manufacturer EANs. Ad
 
 1. An administrator attaches reference pictures to an exact MongoDB product, or runs the retailer bulk import.
 2. The local image encoder creates a normalized 768-dimensional vector for each picture.
-3. A cashier uploads a picture or opens an AI webcam/RTSP input.
-4. The local worker encodes the new product image.
-5. Express compares that vector with the reference library using cosine similarity.
+3. A cashier uploads a picture or opens a webcam/RTSP input. The application checks for a barcode or QR code first.
+4. A registered code performs an exact catalog lookup. Otherwise, the local worker encodes a focused product crop and the full image.
+5. Express combines both image views and compares them with the reference library using cosine similarity.
 6. The best reference per product is used to rank products.
 7. The API returns up to three verified candidates with their reference pictures, current prices and branch stock.
 8. The cashier confirms the exact size and pack, or rejects all suggestions.
@@ -162,7 +162,7 @@ Internal `ASPIRE-...` and `RETAIL-...` identifiers are not manufacturer EANs. Ad
 
 | Component | Current use | What it does not currently guarantee |
 | --- | --- | --- |
-| SigLIP 2 base | Match the complete single-product image against reference vectors | Perfect identification of every Pakistani SKU or an unseen product |
+| SigLIP 2 base | Match focused and full-frame product views against reference vectors | Perfect identification of every Pakistani SKU or an unseen product |
 | YOLO26n | Produce diagnostic object boxes | Reliable product crops, multiple-product checkout or automatic quantities |
 | MongoDB | Provide product IDs, prices, discounts and branch stock | Recognition from an unregistered product name alone |
 | Cashier | Confirm identity and quantity | Unattended checkout |
@@ -173,7 +173,8 @@ The displayed visual similarity is not a calibrated confidence percentage. Unkno
 
 ### Camera automation and safeguards
 
-- Automatic camera recognition analyses a frame when the library and camera are ready.
+- Automatic camera recognition checks printed codes and analyses appearance when the library and camera are ready.
+- Exact registered barcode or QR matches take priority and do not require a visual guess. Unknown codes continue to visual matching.
 - It pauses while suggestions are reviewed, then monitors the camera for a changed, steady view.
 - **Scan next product** is a manual override. Empty-area calibration helps rearm after removal and suppress empty-counter suggestions.
 - Manual capture remains available.
