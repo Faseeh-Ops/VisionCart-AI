@@ -36,7 +36,7 @@ function start(){
   });
   return starting;
 }
-export async function encodeProductPhoto(photo,{mode='single',backgroundPhoto}={}){
+export async function encodeProductPhoto(photo,{mode='single',backgroundPhoto,purpose='query'}={}){
   if(pending.size>=4)throw Object.assign(Error('AI is busy. Try again in a moment.'),{status:429});
   await start();
   if(pending.size>=4)throw Object.assign(Error('AI is busy. Try again in a moment.'),{status:429});
@@ -44,7 +44,7 @@ export async function encodeProductPhoto(photo,{mode='single',backgroundPhoto}={
     const id=randomUUID();
     const timer=setTimeout(()=>{pending.delete(id);reject(Object.assign(Error('AI recognition timed out. Please try again.'),{status:504}));},45000);
     pending.set(id,{resolve,reject,timer});
-    child.stdin.write(JSON.stringify({id,photo,mode,backgroundPhoto})+'\n',error=>{if(error){pending.delete(id);clearTimeout(timer);reject(unavailable());}});
+    child.stdin.write(JSON.stringify({id,photo,mode,backgroundPhoto,purpose})+'\n',error=>{if(error){pending.delete(id);clearTimeout(timer);reject(unavailable());}});
   });
 }
 process.once('exit',()=>child?.kill());
