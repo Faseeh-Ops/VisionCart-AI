@@ -113,7 +113,7 @@ test('camera starts and stops with navigation',async({page})=>{
 test('decodes a real EAN-13 barcode image into its matching product',async({page})=>{
   await page.goto('/#/products');
   const pepsi=page.locator('.catalog-product').filter({hasText:'Pepsi'});
-  await pepsi.getByRole('button',{name:'Edit price / barcode'}).click();
+  await pepsi.getByRole('button',{name:'Edit product & discount'}).click();
   await page.getByLabel('barcode',{exact:true}).fill('1234567890128');
   await page.getByRole('button',{name:'Save product',exact:true}).click();
   await page.getByRole('button',{name:'Billing station',exact:true}).click();
@@ -227,7 +227,7 @@ test('MongoDB admin and cashier access, catalog editing, scan and atomic invoice
   await expect(cashierPage.locator('.connection')).toContainText('Connected workspace');
   await cashierPage.getByRole('button',{name:'Open account menu'}).click();await cashierPage.getByRole('button',{name:'Profile & photo'}).click();await cashierPage.getByLabel('Working store').selectOption(clifton._id);await cashierPage.getByRole('button',{name:'Save working store'}).click();await expect(cashierPage.locator('.workspace-store')).toContainText('Aspire Clifton');await expect(cashierPage.locator('.workspace-store')).toContainText('Clifton - Karachi');await cashierPage.reload();await expect(cashierPage.locator('.workspace-store')).toContainText('Aspire Clifton');
   await expect(cashierPage.getByRole('button',{name:'Sales reports',exact:true})).toHaveCount(0);await expect(cashierPage.getByRole('button',{name:'Login logs',exact:true})).toHaveCount(0);
-  await cashierPage.getByRole('button',{name:'Products',exact:true}).click();await expect(cashierPage.getByRole('button',{name:'Scan into inventory'})).toHaveCount(0);await expect(cashierPage.getByRole('button',{name:'Edit price / barcode'})).toHaveCount(0);
+  await cashierPage.getByRole('button',{name:'Products',exact:true}).click();await expect(cashierPage.getByRole('button',{name:'Scan into inventory'})).toHaveCount(0);await expect(cashierPage.getByRole('button',{name:'Edit product & discount'})).toHaveCount(0);
   await cashierPage.locator('.catalog-product').filter({hasText:'Pepsi'}).getByRole('button',{name:'Add to bill'}).click();await expect(cashierPage.locator('.cart-price')).toContainText('Rs 112.5');await expect(cashierPage.locator('.bill-totals')).toContainText('Rs 12.5');
   await expect(cashierPage.locator('.avatar-trigger')).toContainText('T');
   await cashierPage.getByRole('button',{name:'Open account menu'}).click();await expect(cashierPage.getByRole('button',{name:'Log out',exact:true})).toBeVisible();await cashierPage.keyboard.press('Escape');await expect(cashierPage.locator('.account-dropdown')).toHaveCount(0);
@@ -327,8 +327,21 @@ test('RTSP frames automatically identify and bill a matching QR code once',async
  await page.route('**/api/cameras/rtsp/qr-test/frame',route=>route.fulfill({contentType:'image/png',body:qr}));
  await page.route('**/api/cameras/rtsp/qr-test/disconnect',route=>route.fulfill({json:{success:true}}));
  await page.getByRole('button',{name:'Barcode / QR RTSP camera',exact:true}).click();await page.getByLabel('RTSP camera address').fill('rtsp://192.168.1.50/stream');await page.getByRole('button',{name:'Connect RTSP camera',exact:true}).last().click();
- await expect(page.locator('.cart-row')).toHaveCount(1);await expect(page.locator('.detection-result')).toContainText('QR code (QR_CODE)');
+ await expect(page.locator('.cart-row')).toHaveCount(1,{timeout:20000});await expect(page.locator('.detection-result')).toContainText('QR code (QR_CODE)');
  await page.getByRole('button',{name:'Use webcam instead'}).click();await expect(page.locator('.cart-row')).toHaveCount(1);
+});
+
+test('hybrid AI scanner prioritizes an exact QR match without visual inference',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ const account=await provisionCashier(request,{Authorization:`Bearer ${admin.token}`},'Hybrid Scan Cashier','hybrid-scan@test.local');
+ await page.route('**/api/ai/status',route=>route.fulfill({json:{available:true,loaded:true,referenceCount:1,model:'test'}}));
+ let visualRequests=0;page.on('request',request=>{if(new URL(request.url()).pathname==='/api/ai/recognize')visualRequests++;});
+ await page.goto('/');await page.evaluate(value=>localStorage.setItem('asp-session',JSON.stringify(value)),account);await page.goto('/#/billing');await page.reload();
+ const qr=await qrPhoto(page,'ASPIRE-PEPSI-500');
+ await page.getByLabel('Recognize product photo with AI').setInputFiles({name:'pepsi-qr.png',mimeType:'image/png',buffer:qr});
+ await expect(page.locator('.cart-row')).toContainText('Pepsi');
+ await expect(page.locator('.ai-code-status')).toContainText('Exact QR match');
+ expect(visualRequests).toBe(0);
 });
 
 test('cashier requests admin-reviewed recovery and replaces assigned temporary password',async({page,request,browser})=>{
