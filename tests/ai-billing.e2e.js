@@ -28,7 +28,7 @@ async function recognize(page,file){
  const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ai/recognize'&&r.request().method()==='POST');
  await page.getByLabel('Recognize product photo with AI').setInputFiles(file);
  const received=await response;expect(received.ok()).toBe(true);const data=await received.json();
- await expect(page.locator('.ai-candidate')).toHaveCount(3);expect(data.requiresConfirmation).toBe(true);expect(data.mode).toBe('full_image_single_product');expect(data.detector.name).toBe('yolo26n');return data;
+ await expect(page.locator('.ai-candidate')).toHaveCount(3);expect(data.requiresConfirmation).toBe(true);expect(data.mode).toBe('focused_and_full_image');expect(data.detector.name).toBe('yolo26n');return data;
 }
 
 test.beforeAll(async({request})=>{
@@ -75,8 +75,8 @@ test('RTSP product recognition explains an empty AI library without sending reco
 test('admin attaches real dataset reference photos through the app; real models create embeddings',async({page,request})=>{
  await login(page,'admin');await page.getByRole('button',{name:'Products',exact:true}).click();
  for(const [i,p]of products.entries()){
-  await page.locator('.catalog-product').filter({hasText:p.barcode}).getByRole('button',{name:'AI photos',exact:true}).click();
-  const dialog=page.getByRole('dialog',{name:'AI product photos'});
+  await page.locator(`.catalog-product[data-product-id="${p._id}"] .ai-photos-button`).evaluate(button=>button.click());
+  const dialog=page.locator('.ai-reference-modal');
   const saved=page.waitForResponse(r=>new URL(r.url()).pathname===`/api/ai/products/${p._id}/references`&&r.request().method()==='POST');
   await dialog.getByLabel('Add AI reference photo').setInputFiles(path.join(dataDir,samples[i].reference.image_file));
   expect((await saved).ok()).toBe(true);await expect(dialog.locator('figure')).toHaveCount(1);await expect(dialog.getByLabel('Close AI photos')).toBeEnabled();
@@ -90,7 +90,7 @@ test('admin attaches real dataset reference photos through the app; real models 
  expect((await request.post('/api/ai/product-photos',{data:{productIds:[]}})).status()).toBe(401);
  expect((await request.post('/api/ai/product-photos',{headers:cashierHeaders,data:{productIds:['invalid']}})).status()).toBe(400);
  expect((await request.post('/api/ai/product-photos',{headers:cashierHeaders,data:{productIds:Array(61).fill(products[0]._id)}})).status()).toBe(400);
- const card=page.locator('.catalog-product').filter({hasText:products[0].barcode});await expect(card.getByRole('img',{name:'Product photo of '+products[0].name,exact:true})).toBeVisible();
+ const card=page.locator(`.catalog-product[data-product-id="${products[0]._id}"]`);await expect(card.getByRole('img',{name:'Product photo of '+products[0].name,exact:true})).toBeVisible();
  await expect.poll(()=>card.locator('img').evaluate(img=>img.naturalWidth)).toBeGreaterThan(0);
  check('Catalog displays stored product photos; cashier photo batches are authenticated, limited to 60 IDs and exclude vectors');
  expect((await request.get(`/api/ai/products/${products[0]._id}/references`,{headers:cashierHeaders})).status()).toBe(403);
@@ -139,13 +139,13 @@ test('independent Tiger photo, webcam and RTSP capture call actual inference',as
  await page.getByRole('button',{name:'New sale',exact:true}).click();
  const uri='data:image/jpeg;base64,'+(await fs.readFile(path.join(dataDir,samples[1].query.image_file))).toString('base64');
  await page.evaluate(async uri=>{const image=new Image();image.src=uri;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');const draw=()=>{ctx.drawImage(image,0,0);requestAnimationFrame(draw);};draw();navigator.mediaDevices.getUserMedia=async()=>canvas.captureStream(10);},uri);
- await page.getByRole('button',{name:'Open AI camera',exact:true}).click();await expect(page.getByRole('button',{name:'Recognize current product',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Open AI camera',exact:true}).click();await expect(page.getByRole('button',{name:'Scan code or recognize product',exact:true})).toBeEnabled();
  const device=await page.getByLabel('AI camera',{exact:true}).locator('option').nth(1).getAttribute('value');
- await page.getByLabel('AI camera',{exact:true}).selectOption(device);await expect(page.getByLabel('Select camera',{exact:true})).toHaveValue(device);await expect(page.getByRole('button',{name:'Recognize current product',exact:true})).toBeEnabled();
- const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ai/recognize'&&r.request().method()==='POST');await page.getByRole('button',{name:'Recognize current product',exact:true}).click();const prediction=await (await response).json();expect(prediction.candidates[0].product._id).toBe(products[1]._id);
+ await page.getByLabel('AI camera',{exact:true}).selectOption(device);await expect(page.getByLabel('Select camera',{exact:true})).toHaveValue(device);await expect(page.getByRole('button',{name:'Scan code or recognize product',exact:true})).toBeEnabled();
+ const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ai/recognize'&&r.request().method()==='POST');await page.getByRole('button',{name:'Scan code or recognize product',exact:true}).click();const prediction=await (await response).json();expect(prediction.candidates[0].product._id).toBe(products[1]._id);
  check('Independent supplied Tiger camera photo ranked first',{similarity:independent.candidates[0].similarity});check('Webcam capture UI calls actual model inference',{camera_transport:'simulated MediaStream using a real dataset image; not physical hardware validation'});
  await page.getByRole('button',{name:'Live camera',exact:true}).click();await expect(page.locator('.ai-camera video')).toHaveCount(0);await expect(page.locator('.scan-window video')).toBeVisible();
- await page.getByRole('button',{name:'Open AI camera',exact:true}).click();await expect(page.locator('.scan-window video')).toHaveCount(0);await expect(page.getByRole('button',{name:'Recognize current product',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Open AI camera',exact:true}).click();await expect(page.locator('.scan-window video')).toHaveCount(0);await expect(page.getByRole('button',{name:'Scan code or recognize product',exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'Close AI camera',exact:true}).click();check('AI and barcode camera modes release each other; device preference stays synchronized');
  const frame=await fs.readFile(path.join(dataDir,samples[1].query.image_file));
  let frameMode='waiting';
