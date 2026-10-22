@@ -4,11 +4,11 @@ import {productPhotoFromElement} from './product-photo.js';
 
 export default function RtspScanner({api,token,onCode,onStop,onCapture,onFrame,captureBusy=false,captureDisabled=false}) {
  const [address,setAddress]=useState(''),[id,setId]=useState(''),[error,setError]=useState(''),[status,setStatus]=useState(''),[busy,setBusy]=useState(false),[frameReady,setFrameReady]=useState(false);
- const preview=useRef(),decodedFrame=useRef(null),seen=useRef(''),callback=useRef(onCode),capture=useRef(onCapture),frameCallback=useRef(onFrame);
+ const preview=useRef(),decodedFrame=useRef(null),seen=useRef({text:'',accepted:false}),callback=useRef(onCode),capture=useRef(onCapture),frameCallback=useRef(onFrame);
  callback.current=onCode;capture.current=onCapture;frameCallback.current=onFrame;
  const connect=async event=>{
   event.preventDefault();setBusy(true);setError('');setFrameReady(false);decodedFrame.current=null;
-  try{const result=await api('/cameras/rtsp/connect',{url:address});seen.current='';setId(result.id);setStatus('Connecting to camera?');setAddress('');}
+  try{const result=await api('/cameras/rtsp/connect',{url:address});seen.current={text:'',accepted:false};setId(result.id);setStatus('Connecting to camera…');setAddress('');}
   catch(e){setError(e.message);}finally{setBusy(false);}
  };
  useEffect(()=>{
@@ -37,13 +37,13 @@ export default function RtspScanner({api,token,onCode,onStop,onCapture,onFrame,c
       const previousUrl=currentUrl;currentUrl=url;decodedFrame.current=image;
       if(preview.current)preview.current.src=url;
       if(previousUrl)URL.revokeObjectURL(previousUrl);
-      setFrameReady(true);setError('');setStatus(capture.current?'RTSP camera live ? AI product recognition':'RTSP camera live ? scanning barcodes and QR codes');
+      setFrameReady(true);setError('');setStatus(capture.current?'RTSP camera live · checking codes and product appearance':'RTSP camera live · scanning barcodes and QR codes');
       if(capture.current)frameCallback.current?.(image);
-      else try{
-       const result=await decodeBarcodePhoto(url);
-       if(!cancelled&&seen.current!==result.getText()){
-        seen.current=result.getText();const details=scanDetails(result);setStatus('Detected '+details.label+' ('+details.format+')');callback.current(result.getText(),details.format);
-       }
+      let exactMatch=false;
+      if(callback.current)try{
+       const result=await decodeBarcodePhoto(url),text=result.getText(),details=scanDetails(result);
+       if(seen.current.text===text)exactMatch=seen.current.accepted;
+       else{const response=await callback.current(text,details.format,image);exactMatch=Boolean(response?.verified??response);seen.current={text,accepted:exactMatch};setStatus(exactMatch?'Exact '+details.label+' match detected':details.label+' is unknown · checking product appearance');}
       }catch{}
      }
     }
@@ -67,7 +67,7 @@ export default function RtspScanner({api,token,onCode,onStop,onCapture,onFrame,c
  </form>:<>
   <div className="scan-window"><img ref={preview} alt="RTSP camera preview" style={{width:'100%',height:'100%',objectFit:'contain'}}/></div><p role="status">{status}</p>
   {onCapture&&<button className="primary" disabled={captureBusy||captureDisabled||!frameReady} onClick={captureProduct}>Recognize RTSP product</button>}
-  {!onCapture&&<button className="secondary" onClick={()=>{seen.current='';}}>Scan next unit</button>}
+  {!onCapture&&<button className="secondary" onClick={()=>{seen.current={text:'',accepted:false};}}>Scan next unit</button>}
   <button className="secondary" onClick={()=>{setFrameReady(false);setId('');}}>Disconnect RTSP</button>
  </>}{error&&<p role="alert">{error}</p>}<button className="text-button" onClick={onStop}>Use webcam instead</button></div>;
 }
