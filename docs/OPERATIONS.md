@@ -78,7 +78,7 @@ Backups are written to the ignored `.tools/backups/` folder and exclude user cre
 python -m pip install imageio-ffmpeg --target .tools/rtsp-dependencies
 ```
 
-- The backend converts RTSP video into JPEG frames. The main cashier RTSP entry uses AI product recognition; Barcode / QR RTSP camera is the separate printed-code backup. Capture waits for a decoded frame.
+- The backend converts RTSP video into JPEG frames. The main cashier RTSP entry checks barcode and QR codes while also monitoring product appearance. A registered code takes priority; an unknown or unreadable code falls back to cashier-confirmed AI matching. Capture waits for a decoded frame.
 - Camera credentials stay in memory and are not returned in error messages.
 - Sessions expire after inactivity; limits are one per account and four per server.
 - Focus, distance, lighting and the printed code determine real-camera decoding quality.
