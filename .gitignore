@@ -17,6 +17,10 @@ models/retail-detector/
 __pycache__/
 *.pyc
 
+# Local management reports are not project source files.
+/docs/Aspire-AI-Billing-Weekly-Progress-Report.docx
+/scripts/generate-weekly-report.ps1
+
 # Generated retailer snapshots and third-party photos stay local.
 /datasets/retail-catalog/*
 !/datasets/retail-catalog/README.md
