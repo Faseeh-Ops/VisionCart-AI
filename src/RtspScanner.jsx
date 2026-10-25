@@ -13,7 +13,7 @@ export default function RtspScanner({api,token,onCode,onStop,onCapture,onFrame,c
  };
  useEffect(()=>{
   if(!id)return;
-  let cancelled=false,currentUrl,pendingUrl,timer;
+  let cancelled=false,currentUrl,pendingUrl,timer,decoding=false;
   decodedFrame.current=null;setFrameReady(false);
   const poll=async()=>{
    try{
@@ -39,12 +39,14 @@ export default function RtspScanner({api,token,onCode,onStop,onCapture,onFrame,c
       if(previousUrl)URL.revokeObjectURL(previousUrl);
       setFrameReady(true);setError('');setStatus(capture.current?'RTSP camera live · checking codes and product appearance':'RTSP camera live · scanning barcodes and QR codes');
       if(capture.current)frameCallback.current?.(image);
-      let exactMatch=false;
-      if(callback.current)try{
-       const result=await decodeBarcodePhoto(url),text=result.getText(),details=scanDetails(result);
-       if(seen.current.text===text)exactMatch=seen.current.accepted;
-       else{const response=await callback.current(text,details.format,image);exactMatch=Boolean(response?.verified??response);seen.current={text,accepted:exactMatch};setStatus(exactMatch?'Exact '+details.label+' match detected':details.label+' is unknown · checking product appearance');}
-      }catch{}
+      if(callback.current&&!decoding){
+       decoding=true;
+       (async()=>{try{
+        const result=await decodeBarcodePhoto(url);if(cancelled)return;
+        const text=result.getText(),details=scanDetails(result);
+        if(seen.current.text!==text){const response=await callback.current(text,details.format,image);if(cancelled)return;const exactMatch=Boolean(response?.verified??response);seen.current={text,accepted:exactMatch};setStatus(exactMatch?'Exact '+details.label+' match detected':details.label+' is unknown · checking product appearance');}
+       }catch{}finally{decoding=false;}})();
+      }
      }
     }
    }catch(e){if(!cancelled){decodedFrame.current=null;setFrameReady(false);setError(e.message);setId('');}return;}
