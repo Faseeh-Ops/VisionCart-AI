@@ -5,22 +5,27 @@ export function frameDistance(a,b){
  return total/a.length;
 }
 export function createCameraCycle(){
- let captured=null,previous=null,stableSince=0,changed=false,departed=false,background=null;
+ let captured=null,previous=null,stableSince=0,changed=false,departed=false,background=null,backgroundSeenAt=0;
  return {
-  reset(){background=null;captured=null;previous=null;stableSince=0;changed=false;departed=false;},
-  setBackground(frame){background=frame;captured=null;previous=frame;stableSince=0;changed=false;departed=false;},
-  capture(frame){captured=frame;previous=frame;stableSince=0;changed=false;departed=false;},
+  reset(){background=null;captured=null;previous=null;stableSince=0;changed=false;departed=false;backgroundSeenAt=0;},
+  setBackground(frame){background=frame;captured=null;previous=frame;stableSince=0;changed=false;departed=false;backgroundSeenAt=0;},
+  capture(frame){captured=frame;previous=frame;stableSince=0;changed=false;departed=false;backgroundSeenAt=0;},
+  isBackground(frame){return Boolean(background&&frameDistance(background,frame)<12);},
   observe(frame,now){
    const moving=frameDistance(previous,frame)>6;previous=frame;
+   if(background){
+    const empty=frameDistance(background,frame)<12;
+    if(empty){if(!backgroundSeenAt)backgroundSeenAt=now;if(now-backgroundSeenAt>=500)departed=true;if(moving)stableSince=now;return false;}
+    if(backgroundSeenAt&&now-backgroundSeenAt>=500)departed=true;
+    backgroundSeenAt=0;
+    if(moving){stableSince=now;return false;}
+    if(!stableSince)stableSince=now;
+    if(captured&&frameDistance(captured,frame)>22)changed=true;
+    return now-stableSince>=800&&(!captured||departed);
+   }
    if(moving){stableSince=now;return false;}
    if(!stableSince)stableSince=now;
    if(captured&&frameDistance(captured,frame)>22)changed=true;
-   if(background){
-    const empty=frameDistance(background,frame)<12;
-    if(empty&&now-stableSince>=500)departed=true;
-    if(empty)return false;
-    return now-stableSince>=800&&(!captured||departed);
-   }
    // A sustained departure lets an identical-looking next packet be scanned.
    // Brief movement away and back does not rearm the camera.
    if(captured&&frameDistance(captured,frame)>22&&now-stableSince>=500)departed=true;
