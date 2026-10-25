@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-local-mongo.ps1
 - Product names, barcodes, prices and discounts are shared across branches.
 - Select **Inventory store** before editing a branch quantity or adding stock.
 - New stores start with zero stock.
-- **Allocate stock between stores** moves existing stock without changing the overall total.
+- Open **Inventory management** to scan incoming products, review branch stock and activity, or use **Allocate stock between stores** without changing the overall total.
 - Both stores must be active; transfers cannot overdraw the source.
 - Retrying the same restock or transfer request cannot duplicate stock.
 - Cashiers choose their saved working store under **Profile & photo**.
