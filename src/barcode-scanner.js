@@ -51,7 +51,7 @@ export async function decodeBarcodePhoto(url) {
     const ctx=canvas.getContext('2d');ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate(angle*Math.PI/180);
     ctx.drawImage(base,x,y,rw,rh,-rw/2,-rh/2,rw,rh);
     try {return reader.decodeFromCanvas(canvas);} catch {}
-   
+
     await new Promise(resolve=>setTimeout(resolve,0));
   }
   throw new Error('No barcode or QR code could be decoded. Try a sharp photo without glare, or enter the product code.');
