@@ -89,6 +89,24 @@ The backend starts a persistent local Python worker on first use. Model loading 
 
 See [AI recognition and camera behavior](docs/AI-RECOGNITION.md) and [retail catalog import](docs/RETAIL-LIBRARY-IMPORT.md).
 
+## What YOLO26n, custom YOLO, and SigLIP2 do
+
+The vision models have different responsibilities. A larger or newer model is not automatically better when it is being asked to solve a different problem.
+
+| Component | Purpose in this project | Current status |
+| --- | --- | --- |
+| Barcode / QR decoder | Reads an exact printed code and looks it up in inventory | Active; preferred when a readable code is present |
+| Generic YOLO26n | Proposes locations that may contain objects or product packages | Active for diagnostic boxes only; not trusted for SKU identity or billing |
+| Custom YOLO26n candidate | Detects the location of retail products using one `retail_product` class | Trained and evaluated locally; not enabled in billing |
+| SigLIP2 | Compares an image with enrolled inventory reference photos and ranks exact product candidates | Active; performs the current visual product matching |
+| Cashier confirmation | Selects the exact product and pack before it is billed | Required for every AI suggestion |
+
+In short, **YOLO finds where a product is; SigLIP2 suggests which product it is**. The generic YOLO checkpoint is loaded from `models/detector/yolo26n.pt`. The experimental custom checkpoint is stored locally as `models/retail-detector/candidate.pt`, but the runtime does not load it automatically.
+
+The custom detector was trained as a one-class localization model. It does not contain separate classes such as Pepsi, Tiger biscuit, or Dalda ghee. Training thousands of SKU-specific YOLO classes would require substantial labelled data and frequent retraining as the catalogue changes. The selected architecture therefore keeps detection and identity separate: YOLO or calibrated counter segmentation creates regions, SigLIP2 compares them with the changing reference library, and the cashier resolves uncertainty.
+
+The latest end-to-end visual evaluation enrolled 18 Rahim Store reference photos and submitted 18 different Carrefour photos of the corresponding products. SigLIP2 ranked the expected product first for **17/18 (94.44%)** and within the first three for **18/18 (100%)**. The correct eggs product ranked third behind an incorrect Coca-Cola suggestion, demonstrating that the current system is assisted recognition rather than unattended checkout. See the [application AI results](docs/AI-APPLICATION-TEST-RESULTS.md).
+
 ## GPU training and measured limits
 
 An experimental one-class retail detector was fine-tuned locally on an **RTX 4050 Laptop GPU with 6 GB VRAM**. The dataset contained **900 synthetic scenes from 160 catalog photos**, with source-disjoint training, validation, and test splits. Training stopped early after 24 epochs; test results compare the selected checkpoint with class-agnostic generic YOLO detections.
@@ -175,6 +193,7 @@ datasets/     Dataset documentation; generated snapshots/images are ignored
 - [Model setup](models/README.md)
 - [GPU training](docs/GPU-DETECTOR-TRAINING.md)
 - [Evaluation results and limitations](docs/MODEL-EVALUATION.md)
+- [Expanded AI application test results](docs/AI-APPLICATION-TEST-RESULTS.md)
 - [Project roadmap](docs/PROJECT-README.md)
 - [Per-file change notes](docs/CHANGELOG.md)
 
