@@ -16,7 +16,7 @@ function start(){
   starting=new Promise((resolve,reject)=>{
     const processHandle=spawn(python(),['-u',path.resolve('server/ai-worker.py')],{windowsHide:true,stdio:['pipe','pipe','pipe']});
     child=processHandle;
-    const timer=setTimeout(()=>{reject(unavailable());processHandle.kill();},90000);
+    const timer=setTimeout(()=>{reject(unavailable());processHandle.kill();},180000);
     const fail=()=>{
       clearTimeout(timer);if(child!==processHandle)return;
       ready=false;starting=null;child=null;reject(unavailable());
