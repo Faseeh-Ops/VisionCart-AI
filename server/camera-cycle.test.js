@@ -62,3 +62,17 @@ test('a brief empty frame does not rearm calibrated scanning',()=>{
  gate.observe(frame(80),1400);
  assert.equal(gate.observe(frame(80),2400),false);
 });
+
+test('a held empty area rearms even when slow processing yields one empty frame',()=>{
+ const gate=createCameraCycle();gate.setBackground(frame(200));gate.capture(frame(80));
+ assert.equal(gate.observe(frame(200),1000),false);
+ assert.equal(gate.observe(frame(80),3700),false);
+ assert.equal(gate.observe(frame(80),4600),true);
+});
+
+test('reports when a calibrated camera has returned to its empty scan area',()=>{
+ const gate=createCameraCycle();gate.setBackground(frame(200));
+ assert.equal(gate.isBackground(frame(200)),true);
+ assert.equal(gate.isBackground(frame(190)),true);
+ assert.equal(gate.isBackground(frame(80)),false);
+});
