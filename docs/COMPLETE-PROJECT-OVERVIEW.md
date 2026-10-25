@@ -90,7 +90,7 @@ JWTs expire after eight hours. Logout clears the browser session and records an 
 | Team & access | Administrator account creation and cashier access controls |
 | Profile & photo | Profile picture, name initial fallback and persistent cashier working-store choice |
 | Stores | Administrator store creation, status control and entry to branch details |
-| Store details | Branch inventory, action history, filtering and CSV export |
+| Inventory management | Branch stock, product receiving, allocation, activity history and CSV export |
 | Sales reports | Cashier/product/day/store sales summaries |
 | Login logs | Account activity and sign-in results |
 | Password requests | Administrator review of cashier recovery requests |
@@ -280,7 +280,7 @@ See [live import results](RETAIL-LIBRARY-IMPORT-RESULTS.md), [import rules](RETA
 | Invoice visibility | Cashiers see their own history; admins see all |
 | Reprint/PDF | Uses saved receipt values through browser printing |
 | Sales reports | Quantities, revenue, discounts and invoice counts grouped by cashier, product, day and store |
-| Store details | Current branch quantities, product detail and activity |
+| Inventory management | Current branch quantities, receiving, allocation, product detail and activity |
 | Activity | Sale lines, scans, restocks, transfers, manual edits and relevant account/store events |
 | CSV downloads | Inventory or all matching activity, across report pages |
 | Login logs | Success/failure, role mismatch, inactive access, password changes and admin account actions |
