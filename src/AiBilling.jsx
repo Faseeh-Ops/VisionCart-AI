@@ -55,9 +55,15 @@ export default function AiBilling({api,session,storeId,cart,onProduct,onCode,onR
  };
  const automaticFrame=element=>{
   latestElement.current=element;
-  if(!automatic||!canRecognize||error||waitingNext||(multiple&&!backgroundPhoto))return;
+  if(!automatic||!canRecognize||error||(multiple&&!backgroundPhoto))return;
   try{
-   const frame=cameraFingerprint(element);if(!frame||!cycle.current.observe(frame,Date.now()))return;
+   const frame=cameraFingerprint(element);if(!frame)return;
+   if(waitingNext){
+    if(calibrated&&cycle.current.isBackground(frame)){cycle.current.setBackground(frame);setWaitingNext(false);setPrediction(null);setPhoto('');setCodeStatus('');exactSeen.current={code:'',time:0,accepted:false};lastAutomatic.current=0;}
+    else cycle.current.observe(frame,Date.now());
+    return;
+   }
+   if(!cycle.current.observe(frame,Date.now()))return;
    if(prediction||inFlight.current)return;
    if(Date.now()-lastAutomatic.current<1200)return;
    cycle.current.capture(frame);lastAutomatic.current=Date.now();
