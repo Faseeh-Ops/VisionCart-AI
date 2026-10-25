@@ -61,6 +61,7 @@ test.beforeAll(async()=>{
   await mongoose.connection.db.collection('users').insertOne({name:'Test Admin',email:'admin@test.local',password:await bcrypt.hash('TestPassword123!',12),role:'admin'});
   await mongoose.disconnect();
 });
+
 test.afterAll(async()=>{
   const database=config.metadata.database;
   if(!/^aspire_test_\d+$/.test(database))throw Error('Refusing to clean a non-test database');
@@ -337,9 +338,9 @@ test('hybrid AI scanner prioritizes an exact QR match without visual inference',
  await page.route('**/api/ai/status',route=>route.fulfill({json:{available:true,loaded:true,referenceCount:1,model:'test'}}));
  let visualRequests=0;page.on('request',request=>{if(new URL(request.url()).pathname==='/api/ai/recognize')visualRequests++;});
  await page.goto('/');await page.evaluate(value=>localStorage.setItem('asp-session',JSON.stringify(value)),account);await page.goto('/#/billing');await page.reload();
- const qr=await qrPhoto(page,'ASPIRE-PEPSI-500');
- await page.getByLabel('Recognize product photo with AI').setInputFiles({name:'pepsi-qr.png',mimeType:'image/png',buffer:qr});
- await expect(page.locator('.cart-row')).toContainText('Pepsi');
+ const qr=await qrPhoto(page,'ASPIRE-LAYS-52');
+ await page.getByLabel('Recognize product photo with AI').setInputFiles({name:'lays-qr.png',mimeType:'image/png',buffer:qr});
+ await expect(page.locator('.cart-row')).toContainText("Lay's Classic Salted");
  await expect(page.locator('.ai-code-status')).toContainText('Exact QR match');
  expect(visualRequests).toBe(0);
 });
@@ -445,7 +446,7 @@ test('admin allocates and returns stock with audit history and no duplicate or o
  expect((await request.post('/api/inventory/transfers',{headers:cashierHeaders,data:transfer})).status()).toBe(403);
  expect((await request.get('/api/inventory/transfers',{headers:cashierHeaders})).status()).toBe(403);
  await page.goto('/');await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),admin);await page.reload();
- await page.getByRole('button',{name:'Allocate stock between stores',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Allocate stock between stores'});
+ await page.getByRole('button',{name:'Inventory management',exact:true}).click();await expect(page.getByRole('button',{name:'Scan products into inventory',exact:true})).toBeVisible();await page.getByRole('button',{name:'Allocate stock between stores',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Allocate stock between stores'});
  await dialog.getByLabel('To store',{exact:true}).selectOption(store._id);await dialog.getByLabel('Product to allocate').selectOption(product._id);await dialog.getByLabel('Units to transfer').fill('100');
  await expect(dialog.locator('.transfer-preview')).toContainText('500 \u2192 400 units');await dialog.getByRole('button',{name:'Transfer stock',exact:true}).click();
  await expect(dialog.getByRole('status')).toContainText('100 units of Allocation biscuits transferred');expect(await stock(main)).toBe(400);expect(await stock(store._id)).toBe(100);
@@ -497,11 +498,11 @@ test('admin store details track cashier actions and download complete filtered s
  const otherCsv=await (await request.get('/api/admin/store-reports/'+other._id+'/export?kind=activity',{headers})).text();expect(otherCsv).toContain('Transfer in');expect(otherCsv).not.toContain(invoice.number);
  const old=await (await request.get(base+'/activity?to=2000-01-01',{headers})).json();expect(old.total).toBe(0);
  await page.goto('/');await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),admin);await page.reload();await page.getByRole('button',{name:'Stores',exact:true}).click();await page.getByRole('button',{name:'View details for Tracking Carrefour',exact:true}).click();
- await expect(page).toHaveURL(/store-details/);await expect(page.getByRole('heading',{name:'Product stock: Tracking Carrefour'})).toBeVisible();await page.getByLabel('Find store product').fill('Tracking biscuits');await expect(page.locator('.store-details tbody').first()).toContainText('88');
+ await expect(page).toHaveURL(/inventory/);await expect(page.getByRole('heading',{name:'Inventory management',exact:true,level:2})).toBeVisible();await expect(page.getByRole('heading',{name:'Product stock: Tracking Carrefour'})).toBeVisible();await page.getByLabel('Find store product').fill('Tracking biscuits');await expect(page.locator('.store-details tbody').first()).toContainText('88');
  await page.getByLabel('Store activity account').selectOption(cashierId);await expect(page.locator('.store-activity-table')).toContainText('Naveed Tracking');await page.locator('.store-activity-table').getByRole('button',{name:'Next',exact:true}).click();await expect(page.locator('.store-activity-table')).toContainText(invoice.number);
  const event=page.waitForEvent('download');await page.getByRole('button',{name:'Download activity CSV',exact:true}).click();const download=await event;expect(download.suggestedFilename()).toBe('Tracking-Carrefour-activity.csv');const stream=await download.createReadStream();const chunks=[];for await(const chunk of stream)chunks.push(chunk);expect(Buffer.concat(chunks).toString('utf8')).toContain('TRACK-UNKNOWN-54');
  const inventoryEvent=page.waitForEvent('download');await page.getByRole('button',{name:'Download inventory CSV',exact:true}).click();const inventoryDownload=await inventoryEvent;const inventoryStream=await inventoryDownload.createReadStream();const inventoryChunks=[];for await(const chunk of inventoryStream)inventoryChunks.push(chunk);expect(Buffer.concat(inventoryChunks).toString('utf8')).toContain('"Tracking biscuits","TRACK-BISCUITS","Biscuits","88","10"');
- await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),cashier);await page.goto('/#/store-details');await page.reload();await expect(page.getByRole('button',{name:'Store details',exact:true})).toHaveCount(0);await expect(page.locator('.role-note')).toContainText('Administrator access is required');
+ await page.evaluate(a=>localStorage.setItem('asp-session',JSON.stringify(a)),cashier);await page.goto('/#/inventory');await page.reload();await expect(page.getByRole('button',{name:'Inventory management',exact:true})).toHaveCount(0);await expect(page.locator('.role-note')).toContainText('Administrator access is required');
 });
 
 
@@ -549,16 +550,19 @@ test('admin controls company-wide and store-specific product discounts',async({p
  const getProduct=async storeId=>(await (await request.get('/api/products?storeId='+storeId,{headers})).json()).find(item=>item._id===product._id);
  expect(await getProduct(carefour._id)).toMatchObject({discountPercent:10,discountScope:'all',globalDiscountPercent:10,storeDiscountPercent:null});
  expect(await getProduct(imtiaz._id)).toMatchObject({discountPercent:10,discountScope:'all'});
- expect((await request.post('/api/products/'+product._id,{headers,data:{...product,storeId:carefour._id,stock:20,discountPercent:25,discountScope:'store'}})).ok()).toBe(true);
+ expect((await request.post('/api/products/'+product._id+'/discount',{headers,data:{storeId:carefour._id,discountPercent:25}})).ok()).toBe(true);
  expect(await getProduct(carefour._id)).toMatchObject({discountPercent:25,discountScope:'store',globalDiscountPercent:10,storeDiscountPercent:25});
  expect(await getProduct(imtiaz._id)).toMatchObject({discountPercent:10,discountScope:'all',storeDiscountPercent:null});
  await request.post('/api/profile/store',{headers:cashHeaders,data:{storeId:carefour._id}});
  const sale=await request.post('/api/invoices',{headers:cashHeaders,data:{storeId:carefour._id,items:[{productId:product._id,quantity:1}],payment:'Cash'}});expect(sale.ok(),await sale.text()).toBe(true);expect((await sale.json()).total).toBe(75);
- expect((await request.post('/api/products/'+product._id,{headers,data:{...product,storeId:imtiaz._id,stock:0,discountPercent:15,discountScope:'all'}})).ok()).toBe(true);
+ expect((await request.post('/api/products/'+product._id+'/discount',{headers,data:{storeId:'all',discountPercent:15}})).ok()).toBe(true);
  expect(await getProduct(carefour._id)).toMatchObject({discountPercent:15,discountScope:'all',storeDiscountPercent:null});expect(await getProduct(imtiaz._id)).toMatchObject({discountPercent:15,discountScope:'all',storeDiscountPercent:null});
- await page.goto('/');await page.evaluate(account=>localStorage.setItem('asp-session',JSON.stringify(account)),admin);await page.reload();await page.getByLabel('Inventory store').selectOption(carefour._id);await page.getByRole('button',{name:'Discounts',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Product discounts',exact:true})).toBeVisible();await page.getByLabel('Search discount products').fill('Promotion biscuits');await page.getByRole('button',{name:'Manage discount',exact:true}).click();await page.getByLabel('Discount percentage').fill('20');await page.getByLabel('Apply discount to').selectOption('store');await page.getByRole('button',{name:'Save discount',exact:true}).click();
+ await page.goto('/');await page.evaluate(account=>localStorage.setItem('asp-session',JSON.stringify(account)),admin);await page.reload();await page.getByRole('button',{name:'Discounts',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Product discounts',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Allocate stock between stores',exact:true})).toHaveCount(0);const target=page.getByLabel('Discount target');await expect(target.locator('option').nth(0)).toContainText('All stores');await expect.poll(()=>target.locator('option').allTextContents()).toEqual(expect.arrayContaining(['All stores — company-wide','Discount Carefour · Lahore','Discount Imtiaz · Karachi']));
+ await target.selectOption(carefour._id);await page.getByLabel('Search discount products').fill('Promotion biscuits');await page.getByRole('button',{name:'Manage discount',exact:true}).click();await page.getByLabel('Discount percentage').fill('20');await page.getByRole('button',{name:'Save discount',exact:true}).click();
  await expect.poll(async()=>(await getProduct(carefour._id)).discountPercent).toBe(20);expect((await getProduct(imtiaz._id)).discountPercent).toBe(15);
+ await target.selectOption('all');await page.getByLabel('Search discount products').fill('Promotion biscuits');await page.getByRole('button',{name:'Manage discount',exact:true}).click();await page.getByLabel('Discount percentage').fill('18');await page.getByRole('button',{name:'Save discount',exact:true}).click();
+ await expect.poll(async()=>(await getProduct(carefour._id)).discountPercent).toBe(18);expect(await getProduct(imtiaz._id)).toMatchObject({discountPercent:18,discountScope:'all',storeDiscountPercent:null});expect((await getProduct(carefour._id)).stock).toBe(19);
  await page.getByRole('button',{name:'Products',exact:true}).click();await page.getByRole('button',{name:'Scan into inventory',exact:true}).click();await expect(page.locator('.inventory-code')).toBeVisible();expect(await page.locator('.inventory-code').evaluate(element=>getComputedStyle(element,'::before').content)).toContain('USB scanner');await page.evaluate(()=>document.activeElement?.blur());await page.keyboard.type(product.barcode,{delay:10});await page.keyboard.press('Enter');await expect(page.locator('.inventory-details')).toContainText('Promotion biscuits');
 });
 
@@ -607,13 +611,34 @@ test('admin controls cashier activation and password resets without deleting his
 
 test('admin can search and confirm a catalogue picture for a product',async({page,request})=>{
  const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ const products=await (await request.get('/api/products',{headers:{Authorization:`Bearer ${admin.token}`}})).json(),lays=products.find(product=>product.name.startsWith("Lay's Classic Salted"));expect(lays).toBeTruthy();
  const picture='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
  let selected=false,selectionBody;
  await page.route('**/api/ai/products/*/image-suggestions?*',route=>route.fulfill({json:{query:"Lay's Classic Salted",candidates:[{provider:'openfoodfacts',name:"Lay's Classic Salted 52 g",details:'Lay’s · 52 g',imageUrl:picture,sourceUrl:'https://world.openfoodfacts.org/product/example',sourceLabel:'Open Food Facts'}],attribution:'Open Food Facts product images are offered under CC BY-SA. Confirm the exact pack before saving.'}}));
  await page.route('**/api/ai/products/*/reference-from-suggestion',async route=>{selectionBody=route.request().postDataJSON();selected=true;await route.fulfill({status:201,json:{_id:'000000000000000000000099',photo:picture,sourceLabel:'Open Food Facts'}});});
  await page.route('**/api/ai/products/*/references',route=>route.fulfill({json:selected?[{_id:'000000000000000000000099',photo:picture,sourceLabel:'Open Food Facts'}]:[]}));
  await page.goto('/');await page.evaluate(value=>localStorage.setItem('asp-session',JSON.stringify(value)),admin);await page.reload();
- await page.getByRole('button',{name:'Products',exact:true}).click();const card=page.locator('.catalog-product').filter({hasText:'ASPIRE-LAYS-52'});await card.getByRole('button',{name:'AI photos',exact:true}).click();
+ await page.getByRole('button',{name:'Products',exact:true}).click();await expect(page.locator('.catalog-product').first()).toBeVisible();const card=page.locator(`.catalog-product[data-product-id="${lays._id}"]`);await expect(card).toBeVisible();await card.locator('.ai-photos-button').click();
  const dialog=page.getByRole('dialog',{name:'Product pictures & AI photos'});await expect(dialog.getByText("Lay's Classic Salted 52 g",{exact:true})).toBeVisible();await expect(dialog.getByText('Open Food Facts',{exact:true})).toBeVisible();const browserSearch=dialog.getByRole('link',{name:'Search Google Images'});await expect(browserSearch).toHaveAttribute('target','_blank');await expect(browserSearch).toHaveAttribute('href',/google\.com\/search\?tbm=isch/);
  await dialog.getByRole('button',{name:'Use this picture',exact:true}).click();await expect(dialog.getByText('1/8 saved pictures')).toBeVisible();expect(selectionBody.provider).toBe('openfoodfacts');expect(selectionBody.imageUrl).toBe(picture);
+});
+
+test('cashier settings expose account controls and enforce branch card payments',async({page,request})=>{
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json(),adminHeaders={Authorization:`Bearer ${admin.token}`};
+ const cashier=await provisionCashier(request,adminHeaders,'Settings Cashier','settings-cashier@test.local'),cashierHeaders={Authorization:`Bearer ${cashier.token}`};
+ expect((await request.post('/api/profile/store-payment',{headers:adminHeaders,data:{enabled:false}})).status()).toBe(403);
+ expect((await request.post('/api/profile/store-payment',{headers:cashierHeaders,data:{enabled:'no'}})).status()).toBe(400);
+ await page.goto('/');await page.evaluate(value=>localStorage.setItem('asp-session',JSON.stringify(value)),cashier);await page.goto('/#/settings');await page.reload();
+ await expect(page.getByRole('heading',{name:'Account & checkout settings'})).toBeVisible();
+ await expect(page.getByText('Role-based access',{exact:true})).toHaveCount(0);
+ await expect(page.getByLabel('Upload your profile photo')).toBeVisible();
+ await expect(page.getByLabel('Current password')).toBeVisible();
+ const cardSwitch=page.getByRole('switch',{name:'Enable card payments for this store'});await expect(cardSwitch).toHaveAttribute('aria-checked','true');
+ await cardSwitch.click();await expect(cardSwitch).toHaveAttribute('aria-checked','false');
+ const profile=await (await request.get('/api/profile',{headers:cashierHeaders})).json();expect(profile.selectedStore.cardPaymentsEnabled).toBe(false);
+ const products=await (await request.get('/api/products',{headers:cashierHeaders})).json(),product=products.find(item=>item.barcode==='ASPIRE-PEPSI-500')||products[0];
+ expect((await request.post('/api/inventory/restock',{headers:adminHeaders,data:{barcode:product.barcode,quantity:1,requestId:'card-settings-stock-'+Date.now()}})).ok()).toBe(true);
+ const blocked=await request.post('/api/invoices',{headers:cashierHeaders,data:{storeId:profile.selectedStore._id,items:[{productId:product._id,quantity:1}],payment:'Card'}});expect(blocked.status()).toBe(400);expect((await blocked.json()).error).toContain('Card payments are disabled');
+ await cardSwitch.click();await expect(cardSwitch).toHaveAttribute('aria-checked','true');
+ await page.getByRole('button',{name:'Billing station',exact:true}).click();await expect(page.getByRole('button',{name:'Card',exact:true})).toBeEnabled();
 });
