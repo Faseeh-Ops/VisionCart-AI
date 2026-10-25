@@ -1,79 +1,86 @@
 # AI Recognition: Application Test Results
 
-**Historical integration report.** See [current verification and evaluation](MODEL-EVALUATION.md) for calibrated multi-product support and the trained detector candidate.
+**Tested:** 25 October 2026 · Visible browser · Local CPU · Real SigLIP2, YOLO26n, Express and MongoDB
 
-**Tested:** 19 October 2026 · Visible Microsoft Edge · Local CPU · Real SigLIP 2, YOLO26n, Express and MongoDB
+The end-to-end AI test now covers **18 products**, not only Tiger biscuit or the original six-item sample. Every query uses a Carrefour image while its enrolled reference is a different Rahim Store image. No inference, catalogue, authentication, inventory or invoice API was mocked.
 
-**AI is now connected to the billing application.** Admins enrolled product photos through the UI. Cashiers uploaded dataset images, reviewed actual model suggestions, confirmed products and generated a saved invoice.
+## Summary
 
-**Live library update:** The real store database now contains 9,360 products and 8,621 AI reference photos. See [live import and browser verification](RETAIL-LIBRARY-IMPORT-RESULTS.md). The six-product results below describe the separate, isolated integration suite.
+| Metric | Result |
+| --- | ---: |
+| Products tested | 18 |
+| Different-retailer query/reference pairs | 18/18 |
+| Top-1 accuracy | **94.44% (17/18)** |
+| Top-3 accuracy | **100% (18/18)** |
+| Micro precision | **94.44%** |
+| Micro recall | **94.44%** |
+| Micro F1 | **94.44%** |
+| Average top suggestion similarity | **0.8655** |
+| Average end-to-end scan time | **4.48 seconds** |
+| Browser errors | **0** |
+| Playwright scenarios | **7/7 passed** in 4.8 minutes |
 
-## Dataset recognition
+Precision, recall and F1 are equal here because this is a single-label test with one query per product. This small curated set is integration evidence, not a production accuracy guarantee.
 
-The library contained **six exact inventory products**. These are application-integration checks, not a general retail accuracy estimate.
+## Product results
 
-| Product | Query/reference relationship | First suggested product |
-| --- | --- | --- |
-| Pepsi 1.5 lt | Same source photo | Correct |
-| LU Tiger Ticky Pack | Same source photo | Correct |
-| Dalda VTF Banaspati Ghee 1 kg | Same source photo | Correct |
-| Falak Daily Basmati Rice 1 kg | Different retailer photos | Correct |
-| K&N's Nuggets 1 kg | Different retailer photos | Correct |
-| Nestle Milk Pak Dairy Cream 200 ml | Different retailer photos | Correct |
+| Expected product | First suggestion | Rank of correct product | Similarity | Time |
+| --- | --- | ---: | ---: | ---: |
+| Bread & Beyond Milky Bread Large | Correct | 1 | 0.7351 | 5.55 s |
+| Borges Red Wine Vinegar 500 ml | Correct | 1 | 0.8576 | 4.64 s |
+| K&N's Nuggets 1 kg | Correct | 1 | 0.8963 | 4.78 s |
+| K&N's Croquettes 1 kg | Correct | 1 | 0.8691 | 4.59 s |
+| Shangrila Tomato Ketchup 3.25 kg | Correct | 1 | 0.8610 | 4.61 s |
+| Butterfly Mother Comforts Extra Large 10 pcs | Correct | 1 | 0.8953 | 4.86 s |
+| Co Natural Tea Tree & Neem Face Wash 60 ml | Correct | 1 | 0.9264 | 4.52 s |
+| Milk Fields Dairy Cream 200 ml | Correct | 1 | 0.8529 | 4.39 s |
+| Top-Tip's Cotton Buds 300 pcs | Correct | 1 | 0.8013 | 4.47 s |
+| Haleeb Fresh Milk Cream 200 ml | Correct | 1 | 0.9074 | 4.29 s |
+| Sensodyne Gum Care Extra Soft Toothbrush | Correct | 1 | 0.9623 | 4.30 s |
+| Cappy Pulpy Orange 350 ml | Correct | 1 | 0.8341 | 4.33 s |
+| Nestle Pure Life Water 500 ml | Correct | 1 | 0.9332 | 4.28 s |
+| Nestle Milk Pak Dairy Cream 200 ml | Correct | 1 | 0.8833 | 4.45 s |
+| Falak Daily Basmati Rice 1 kg | Correct | 1 | 0.9345 | 4.30 s |
+| Coca Cola 500 ml | Correct | 1 | 0.9369 | 4.32 s |
+| Fresher Mango Nectar Juice 500 ml | Correct | 1 | 0.8973 | 3.47 s |
+| Farm Fresh Omega-3 Eggs 12 pcs | Coca Cola 500 ml | **3** | 0.5943 | 4.49 s |
 
-**6/6 first-choice matches**, including **3/3 cross-store photos**. The three same-photo cases verify the wiring and are not evidence of generalization. A separate, previously supplied handheld Tiger photo also ranked the Tiger reference first; its cosine similarity was **0.6856**, not a confidence percentage. Pack identity in cross-store samples uses catalog labels; manufacturer barcode ground truth remains unavailable.
+The eggs pack is the only top-1 error. The correct eggs product still appeared as the third suggestion, so the cashier could select it. Similarity is a cosine similarity score, not a confidence percentage.
 
-## Confirmed sale
+## Billing and safety results
 
-- Every match required **Confirm & add one**. No item entered the bill automatically.
-- One of each product produced an invoice for **Rs 2,759** using MongoDB prices.
-- All six branch quantities changed from **10 to 9** only after invoice creation.
-- The admin sales report recorded **6 units, 1 invoice, Rs 2,759**.
-- Repeat confirmations and another cashier's attempts to confirm a suggestion were rejected.
+- All 18 suggestions required cashier confirmation before entering the bill.
+- The confirmed invoice contained 18 products and totalled **Rs 8,460**.
+- Confirmed branch stock changed from 10 to 9 only after invoice creation.
+- Another cashier could not confirm someone else's recognition result.
+- Replayed confirmations were rejected.
+- An unknown Mahmood coffee photo was rejected and logged without creating a sale.
+- Current price, stock and selected store were rechecked during confirmation.
+- An empty AI library showed setup guidance and did not send repeated inference requests.
 
-## Capture and safeguards
+## Camera and multi-product checks
 
-| Check | Result |
-| --- | --- |
-| Admin UI photo enrollment and persisted embeddings | Passed; six 768-dimensional reference vectors |
-| Duplicate reference upload | Reused the existing reference |
-| Reference management by cashier | Denied |
-| Malformed image | Rejected |
-| Supplied Tiger camera photo | Correct first candidate |
-| Webcam capture → real inference | Passed with a controlled dataset MediaStream |
-| Main RTSP control opens AI recognition | Passed; barcode/QR RTSP backup has a separate, explicit control |
-| Empty AI reference library | Setup warning shown; automatic camera requests blocked |
-| Automatic RTSP frames → real inference | Passed with controlled camera frames; no capture click required |
-| RTSP frame loading and recovery | Capture waits for a decoded frame, works while the visible preview reloads, and recovers after unreadable frames |
-| Automatic recognition during review | Paused; no repeated inference while suggestions await confirmation |
-| After confirming or rejecting an RTSP match | Paused; Scan next product re-arms recognition without repeatedly adding a stationary packet |
-| Unknown Mahmood photo | Cashier rejected suggestions; unverified AI event created; no sale |
-| Price changed after suggestion | Confirmation used the current database price |
-| Product made out of stock | Confirmation blocked |
-| Working store changed | Old prediction could not be confirmed |
+- K&N's Nuggets replaced Tiger as the webcam and RTSP inference fixture.
+- Webcam capture called the actual model through a controlled MediaStream.
+- RTSP recognition waited for decoded frames, paused during review and recovered after an invalid frame.
+- Empty-frame calibration blocked repeated scans of an empty counter.
+- Two scans of the same physical SKU merged into quantity two.
+- Five separated catalogue cards were localized and reviewed; repeated Shangrila ketchup merged by SKU.
 
-Inference, reference enrollment, authentication, inventory and invoice endpoints were real. Only camera transport was simulated for repeatability; these tests do not validate physical webcam focus, actual RTSP connectivity or camera/network latency.
-
-The updated AI suite passed **5/5 browser scenarios** in **1.2 minutes**, including automatic RTSP recognition and empty-library behavior. The **three targeted camera regressions** also passed in **26.4 seconds**: camera discovery, navigation cleanup and RTSP QR decoding. The RTSP regression now provisions its own cashier so it can run independently. The earlier **14 unit tests**, **15 application workflow tests** and **3 barcode/QR regression scenarios** also passed. Tests use temporary databases and generated internal product identifiers; production inventory and accounts are not changed.
-
-## Current limits
-
-- SigLIP uses the full single-product image. YOLO runs and reports boxes, but its generic packet detections remain unreliable and are not used as trusted crops.
-- Unknown items can still receive similar-looking suggestions. The cashier must reject them; automatic unknown rejection is not calibrated.
-- Multiple products, automatic quantities and unattended checkout remain unvalidated.
-- This builds a reference library; it does not fine-tune model weights.
-- Reference photos must be attached to actual inventory products before live use. The test library was in a temporary database that was removed afterward.
-
-The tested AI environment used PyTorch 2.14.1+cpu, Transformers 5.19.0, Ultralytics 8.4.174, Pillow 12.3.0 and NumPy 2.5.2. Model token-ID configuration warnings were observed during the earlier offline benchmark; this integration uses image features only, and the current compatibility evidence is limited to the tests described here.
+Camera transport was simulated with real dataset frames for repeatability. This run does not measure a physical camera's focus, lighting, network latency or FFmpeg reliability.
 
 ## Evidence
 
-- Admin reference photos (local artifact: `../datasets/retail-catalog/ai-application-test/admin-ai-photos.png`)
-- AI photo and suggestions in the real billing screen (local artifact: `../datasets/retail-catalog/ai-application-test/ai-suggestions.png`)
-- Confirmed AI bill (local artifact: `../datasets/retail-catalog/ai-application-test/ai-confirmed-bill.png`)
-- Independent Tiger camera-photo result (local artifact: `../datasets/retail-catalog/ai-application-test/tiger-camera-photo.png`)
-- AI invoice PDF (local artifact: `../datasets/retail-catalog/ai-application-test/ai-invoice.pdf`)
-- Raw observations, detections, scores and test statuses (local artifact: `../datasets/retail-catalog/ai-application-test/results.json`)
+- [Raw observations and scores](../datasets/retail-catalog/ai-application-test/results.json)
 - [Playwright report](../playwright-report/ai-application/index.html)
+- `datasets/retail-catalog/ai-application-test/ai-suggestions.png`
+- `datasets/retail-catalog/ai-application-test/ai-confirmed-bill.png`
+- `datasets/retail-catalog/ai-application-test/cross-store-camera-photo.png`
+- `datasets/retail-catalog/ai-application-test/multi-product-review.png`
+- `datasets/retail-catalog/ai-application-test/ai-invoice.pdf`
 
-For setup, daily use and the repeatable test command, see [AI recognition](AI-RECOGNITION.md).
+Run the same test with:
+
+```powershell
+npm run test:ai
+```
