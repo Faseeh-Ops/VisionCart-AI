@@ -31,5 +31,6 @@ test('USB keyboard scanner captures a barcode without focusing the field',async(
   await page.evaluate(()=>document.activeElement?.blur());
   await page.keyboard.type('ASPIRE-LAYS-52',{delay:10});await page.keyboard.press('Enter');
   await expect(page.locator('.cart-row')).toContainText("Lay's Classic Salted");
+  await expect(page.getByRole('textbox',{name:'Barcode',exact:true})).toHaveValue('ASPIRE-LAYS-52');
   await expect(page.locator('.detection-result')).toContainText('USB_SCANNER');
 });
