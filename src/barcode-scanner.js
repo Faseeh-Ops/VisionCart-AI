@@ -1,5 +1,6 @@
 import {BrowserMultiFormatReader} from '@zxing/browser';
 import {BarcodeFormat,DecodeHintType} from '@zxing/library';
+export {createScanConsensus,validScannedCode} from '../shared/scan-validation.js';
 
 export function scanDetails(result) {
   const format=BarcodeFormat[result.getBarcodeFormat()]||'UNKNOWN';
@@ -9,7 +10,7 @@ export function scanDetails(result) {
 export function createBarcodeReader() {
   const hints=new Map();
   hints.set(DecodeHintType.TRY_HARDER,true);
-  hints.set(DecodeHintType.POSSIBLE_FORMATS,[BarcodeFormat.EAN_13,BarcodeFormat.EAN_8,BarcodeFormat.UPC_A,BarcodeFormat.UPC_E,BarcodeFormat.CODE_128,BarcodeFormat.CODE_39,BarcodeFormat.ITF,BarcodeFormat.CODABAR,BarcodeFormat.QR_CODE,BarcodeFormat.DATA_MATRIX,BarcodeFormat.AZTEC,BarcodeFormat.PDF_417]);
+  hints.set(DecodeHintType.POSSIBLE_FORMATS,[BarcodeFormat.EAN_13,BarcodeFormat.EAN_8,BarcodeFormat.UPC_A,BarcodeFormat.UPC_E,BarcodeFormat.CODE_128,BarcodeFormat.QR_CODE]);
   return new BrowserMultiFormatReader(hints,{delayBetweenScanAttempts:120,delayBetweenScanSuccess:400});
 }
 
