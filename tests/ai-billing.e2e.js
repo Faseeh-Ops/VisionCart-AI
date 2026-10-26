@@ -29,9 +29,9 @@ async function login(page,role='cashier'){
 const check=(name,details={})=>result.checks.push({name,...details});
 async function recognize(page,file){
  const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ai/recognize'&&r.request().method()==='POST');
- await page.getByLabel('Recognize product photo with AI').setInputFiles(file);
+ await page.getByLabel('Scan a product photo').setInputFiles(file);
  const received=await response;expect(received.ok()).toBe(true);const data=await received.json();
- await expect(page.locator('.ai-candidate')).toHaveCount(3);expect(data.requiresConfirmation).toBe(true);expect(data.mode).toBe('focused_and_full_image');expect(data.detector.name).toBe('yolo26n');return data;
+ await expect(page.locator('.ai-candidate')).toHaveCount(3);expect(data.requiresConfirmation).toBe(true);expect(data.mode).toBe('focused_and_full_image');expect(['fast_single_product_path','yolo26n']).toContain(data.detector.name);return data;
 }
 
 test.beforeAll(async({request})=>{
@@ -142,27 +142,26 @@ test('cashier recognizes the expanded cross-store dataset with AI, confirms exac
 
 test('cross-store product photo, webcam and RTSP capture call actual inference',async({page})=>{
  await login(page);
- await page.getByLabel('Automatically recognize camera products').uncheck();
+ await page.getByText('Advanced scanning options').click();await page.getByLabel('Scan automatically when the product is steady').uncheck();
  const independent=await recognize(page,path.join(dataDir,samples[captureIndex].query.image_file));
  expect(independent.candidates[0].product._id).toBe(products[captureIndex]._id);await expect(page.locator('.cart-row')).toHaveCount(0);
  result.independent_cross_store={name:products[captureIndex].name,correct_top1:true,similarity:independent.candidates[0].similarity};await page.screenshot({path:path.join(output,'cross-store-camera-photo.png'),fullPage:true});
  await page.getByRole('button',{name:'New sale',exact:true}).click();
  const uri='data:image/jpeg;base64,'+(await fs.readFile(path.join(dataDir,samples[captureIndex].query.image_file))).toString('base64');
  await page.evaluate(async uri=>{const image=new Image();image.src=uri;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');const draw=()=>{ctx.drawImage(image,0,0);requestAnimationFrame(draw);};draw();navigator.mediaDevices.getUserMedia=async()=>canvas.captureStream(10);},uri);
- await page.getByRole('button',{name:'Open AI camera',exact:true}).click();await expect(page.getByRole('button',{name:'Scan code or recognize product',exact:true})).toBeEnabled();
- const device=await page.getByLabel('AI camera',{exact:true}).locator('option').nth(1).getAttribute('value');
- await page.getByLabel('AI camera',{exact:true}).selectOption(device);await expect(page.getByLabel('Select camera',{exact:true})).toHaveValue(device);await expect(page.getByRole('button',{name:'Scan code or recognize product',exact:true})).toBeEnabled();
- const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ai/recognize'&&r.request().method()==='POST');await page.getByRole('button',{name:'Scan code or recognize product',exact:true}).click();const prediction=await (await response).json();expect(prediction.candidates[0].product._id).toBe(products[captureIndex]._id);
+ const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ai/recognize'&&r.request().method()==='POST');
+ await page.getByRole('button',{name:'Start smart camera',exact:true}).click();await expect(page.getByText(/Automatic scanning active/)).toBeVisible();
+ const device=await page.getByLabel('Smart scanner camera',{exact:true}).locator('option').nth(1).getAttribute('value');
+ await page.getByLabel('Smart scanner camera',{exact:true}).selectOption(device);await expect(page.getByLabel('Smart scanner camera',{exact:true})).toHaveValue(device);
+ const prediction=await (await response).json();expect(prediction.candidates[0].product._id).toBe(products[captureIndex]._id);
  check('A different-retailer product camera photo ranked first',{product:products[captureIndex].name,similarity:independent.candidates[0].similarity});check('Webcam capture UI calls actual model inference',{camera_transport:'simulated MediaStream using a real dataset image; not physical hardware validation'});
- await page.getByRole('button',{name:'Live camera',exact:true}).click();await expect(page.locator('.ai-camera video')).toHaveCount(0);await expect(page.locator('.scan-window video')).toBeVisible();
- await page.getByRole('button',{name:'Open AI camera',exact:true}).click();await expect(page.locator('.scan-window video')).toHaveCount(0);await expect(page.getByRole('button',{name:'Scan code or recognize product',exact:true})).toBeEnabled();
- await page.getByRole('button',{name:'Close AI camera',exact:true}).click();check('AI and barcode camera modes release each other; device preference stays synchronized');
+ await page.getByRole('button',{name:'Stop smart camera',exact:true}).click();check('The unified smart camera releases its media stream cleanly');
  const frame=await fs.readFile(path.join(dataDir,samples[captureIndex].query.image_file));
  let frameMode='waiting';
  await page.route('**/api/cameras/rtsp/connect',route=>route.fulfill({status:201,json:{id:'ai-test-camera'}}));
  await page.route('**/api/cameras/rtsp/ai-test-camera/frame',route=>frameMode==='waiting'?route.fulfill({status:202,json:{pending:true}}):route.fulfill({contentType:'image/jpeg',body:frameMode==='broken'?Buffer.from('unreadable camera frame'):frame}));
  await page.route('**/api/cameras/rtsp/ai-test-camera/disconnect',route=>route.fulfill({json:{success:true}}));
- await page.getByLabel('Automatically recognize camera products').check();
+ await page.getByLabel('Scan automatically when the product is steady').check();
  let recognitionCalls=0;page.on('request',r=>{if(new URL(r.url()).pathname==='/api/ai/recognize')recognitionCalls++;});
  await page.getByRole('button',{name:'Connect RTSP camera',exact:true}).click();
  const panel=page.locator('.ai-billing');await panel.getByLabel('RTSP camera address').fill('rtsp://192.168.1.50:8554/test');
@@ -183,7 +182,7 @@ test('cross-store product photo, webcam and RTSP capture call actual inference',
  await page.getByRole('button',{name:'None of these products',exact:true}).click();
  await page.waitForTimeout(2300);expect(recognitionCalls).toBe(2);
  check('RTSP automatically calls actual model inference, pauses for review and after confirmation/rejection, and resumes only for the next unit',{camera_transport:'simulated RTSP transport with a real dataset frame; no physical camera or FFmpeg validation'});
- await page.getByLabel('Automatically recognize camera products').uncheck();
+ await page.getByLabel('Scan automatically when the product is steady').uncheck();
  // Reproduce a preview reporting zero dimensions during its next image load.
  // Recognition must read the independently decoded frame, not this preview.
  await page.evaluate(()=>{
@@ -206,7 +205,7 @@ test('cross-store product photo, webcam and RTSP capture call actual inference',
 
 test('calibrated camera skips empty frames and merges two identical packets without next-scan clicks',async({page})=>{
  await login(page);
- await page.getByLabel('Automatically recognize camera products').uncheck();
+ await page.getByText('Advanced scanning options').click();await page.getByLabel('Scan automatically when the product is steady').uncheck();
  const blank=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=640;c.height=480;const x=c.getContext('2d');x.fillStyle='#eeeeee';x.fillRect(0,0,640,480);return c.toDataURL('image/jpeg').split(',')[1];}),'base64');
  const packet=await fs.readFile(path.join(dataDir,samples[captureIndex].query.image_file));let current=blank,calls=0;
  page.on('request',r=>{if(new URL(r.url()).pathname==='/api/ai/recognize')calls++;});
@@ -219,7 +218,7 @@ test('calibrated camera skips empty frames and merges two identical packets with
  await expect(panel.getByRole('button',{name:'Recognize RTSP product',exact:true})).toBeEnabled();
  await panel.getByRole('button',{name:'Set empty scan area',exact:true}).click();
  await expect(panel).toContainText('Scan area saved');
- await page.getByLabel('Automatically recognize camera products').check();
+ await page.getByLabel('Scan automatically when the product is steady').check();
  await page.waitForTimeout(2400);expect(calls).toBe(0);
  for(const quantity of [1,2]){
   current=packet;
@@ -235,7 +234,7 @@ test('calibrated camera skips empty frames and merges two identical packets with
 
 test('five separated catalog cards are localized, reviewed and merged by SKU',async({page,request})=>{
  await login(page);
- await page.getByLabel('Automatically recognize camera products').uncheck();
+ await page.getByText('Advanced scanning options').click();await page.getByLabel('Scan automatically when the product is steady').uncheck();
  await page.getByLabel('Multiple products on counter').check();
  const indices=[2,4,6,4,10];
  const photos=await Promise.all(indices.map(async i=>'data:image/jpeg;base64,'+(await fs.readFile(path.join(dataDir,samples[i].reference.image_file))).toString('base64')));
@@ -253,7 +252,7 @@ test('five separated catalog cards are localized, reviewed and merged by SKU',as
  },photos);
  await page.getByLabel('Upload empty counter photo').setInputFiles({name:'empty-counter.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.background,'base64')});
  const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ai/recognize'&&r.request().method()==='POST');
- await page.getByLabel('Recognize product photo with AI').setInputFiles({name:'five-catalog-cards.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.scene,'base64')});
+ await page.getByLabel('Scan a product photo').setInputFiles({name:'five-catalog-cards.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.scene,'base64')});
  const received=await response;const data=await received.json();expect(received.ok(),JSON.stringify(data)).toBe(true);
  expect(data.mode).toBe('separated_counter_products');expect(data.items).toHaveLength(5);
  expect(new Set(data.items.map(i=>i.recognitionId)).size).toBe(5);
