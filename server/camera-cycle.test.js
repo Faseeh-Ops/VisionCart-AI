@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createCameraCycle} from '../src/camera-cycle.js';
+import {createCameraCycle,meaningfulFrameChange} from '../src/camera-cycle.js';
 const frame=value=>Array(48).fill(value);
 test('waits for stable view and does not repeat a stationary product',()=>{
  const gate=createCameraCycle();
@@ -75,4 +75,14 @@ test('reports when a calibrated camera has returned to its empty scan area',()=>
  assert.equal(gate.isBackground(frame(200)),true);
  assert.equal(gate.isBackground(frame(190)),true);
  assert.equal(gate.isBackground(frame(80)),false);
+});
+
+test('camera exposure changes remain empty but a localized product does not',()=>{
+ const background=Array(300).fill(120),brighter=Array(300).fill(155),product=Array(300).fill(120);
+ for(let pixel=0;pixel<2;pixel++)for(let channel=0;channel<3;channel++)product[pixel*3+channel]=220;
+ const gate=createCameraCycle();gate.setBackground(background);
+ assert.equal(gate.isBackground(brighter),true);
+ assert.equal(gate.isBackground(product),false);
+ assert.equal(meaningfulFrameChange(background,brighter),false);
+ assert.equal(meaningfulFrameChange(background,product),true);
 });
