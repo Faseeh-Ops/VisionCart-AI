@@ -24,11 +24,11 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
     if(indexLoading)return indexLoading;
     const version=generation;
     const loading=Reference.find({model:MODEL}).select('productId embedding').lean().then(rows=>{
-      const index=makeReferenceIndex(rows);if(version===generation){cachedIndex=index;indexExpires=Date.now()+15000;}return index;
+      const index=makeReferenceIndex(rows);if(version===generation){cachedIndex=index;indexExpires=Number.POSITIVE_INFINITY;}return index;
     });indexLoading=loading;
     try{return await loading;}finally{if(indexLoading===loading)indexLoading=null;}
   };
-  router.get('/status',async(req,res)=>res.json({...aiAvailability(),referenceCount:await Reference.countDocuments({model:MODEL})}));
+  router.get('/status',async(req,res)=>{const referenceCount=await Reference.countDocuments({model:MODEL});if(referenceCount&&!cachedIndex)await referenceIndex();res.json({...aiAvailability(),referenceCount,indexReady:!referenceCount||Boolean(cachedIndex)});});
   // Both signed-in roles can see catalog pictures, without reference vectors.
   router.post('/product-photos',async(req,res)=>{
     const ids=req.body.productIds;
@@ -95,11 +95,21 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
     const store=await Store.findOne({_id:req.user.selectedStore,active:true});if(!store)throw bad('Select an active working store.');
     const mode=req.body.mode??'single';
     if(!['single','multiple'].includes(mode))throw bad('Choose single or multiple product scanning.');
-    const photo=photoInput(req.body.photo),backgroundPhoto=mode==='multiple'?photoInput(req.body.backgroundPhoto):undefined;
+    const photo=photoInput(req.body.photo),backgroundPhoto=req.body.backgroundPhoto?photoInput(req.body.backgroundPhoto):undefined;
+    if(mode==='multiple'&&!backgroundPhoto)throw bad('Set an empty counter image before scanning multiple products.');
     const references=await referenceIndex();
     if(!references.length)throw bad('Your administrator must add AI photos to inventory products first.',409);
     const encoded=await encodeProductPhoto(photo,{mode,backgroundPhoto});
     if(encoded.model!==MODEL)throw bad('AI returned an invalid model.',503);
+    const cameraMinimum=Number(process.env.AI_CAMERA_MIN_SIMILARITY||-1),legacyCameraMinimum=Number(process.env.AI_LEGACY_CAMERA_MIN_SIMILARITY||.675),uploadMinimum=Number(process.env.AI_MIN_SIMILARITY||.72);
+    const minimum=req.body.cameraTriggered===true?(encoded.sceneChanged===true?cameraMinimum:backgroundPhoto?uploadMinimum:legacyCameraMinimum):uploadMinimum;
+    // Camera motion can make a textured counter look different pixel-by-pixel.
+    // Semantic similarity may suppress it only when OpenCV also finds no large
+    // foreground. This keeps a real packet from being hidden by the counter.
+    const backgroundLimit=Number(process.env.AI_BACKGROUND_SIMILARITY||.88),foregroundLimit=Number(process.env.AI_BACKGROUND_MAX_FOREGROUND||.18),regionLimit=Number(process.env.AI_BACKGROUND_MAX_REGION||.05);
+    const semanticEmpty=Number(encoded.backgroundSimilarity)>=backgroundLimit&&Number(encoded.foregroundRatio)<foregroundLimit&&Number(encoded.largestForegroundRatio)<regionLimit;
+    const sameBackground=backgroundPhoto&&(encoded.sceneChanged===false||semanticEmpty);
+    if(req.body.cameraTriggered===true&&sameBackground)return res.json({requiresConfirmation:true,scoreType:'cosine_similarity_not_probability',mode:encoded.localization,detector:{name:encoded.detector,detections:encoded.detections},noMatch:true,noMatchReason:'aligned_empty_background',bestSimilarity:0,minimumSimilarity:minimum,backgroundSimilarity:encoded.backgroundSimilarity??1,foregroundRatio:encoded.foregroundRatio??0,largestForegroundRatio:encoded.largestForegroundRatio??0,backgroundAligned:Boolean(encoded.backgroundAligned)});
     const makeCandidates=async embedding=>{
     const queryEmbeddings=Array.isArray(embedding?.[0])?embedding:[embedding];
     if(!queryEmbeddings.length||queryEmbeddings.length>3||queryEmbeddings.some(value=>!validEmbedding(value)))throw bad('AI returned an invalid image embedding.',503);
@@ -130,7 +140,9 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
       for(let i=0;i<candidates.length;i++)items.push({...await savePrediction(candidates[i]),box:encoded.regions[i].box,photo:encoded.regions[i].photo});
       return res.json({...common,items,imageSize:encoded.imageSize});
     }
-    res.json({...common,...await savePrediction(await makeCandidates(encoded.embeddings||encoded.embedding))});
+    const candidates=await makeCandidates(encoded.embeddings||encoded.embedding);
+    if(!candidates[0]||candidates[0].similarity<minimum)return res.json({...common,noMatch:true,noMatchReason:'weak_product_match',bestSimilarity:candidates[0]?.similarity||0,minimumSimilarity:minimum,foregroundRatio:encoded.foregroundRatio??0});
+    res.json({...common,...await savePrediction(candidates)});
   });
   router.post('/confirm',async(req,res)=>{
     if(req.user.role!=='cashier')throw bad('Cashier access required.',403);
