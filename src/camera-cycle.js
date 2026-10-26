@@ -4,24 +4,60 @@ export function frameDistance(a,b){
  let total=0;for(let i=0;i<a.length;i++)total+=Math.abs(a[i]-b[i]);
  return total/a.length;
 }
+function changedPixelRatio(a,b,threshold=28){
+ if(!a||!b||a.length!==b.length)return 1;
+ let changed=0,pixels=0;
+ for(let i=0;i<a.length;i+=3){
+  const difference=(Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]))/3;
+  if(difference>threshold)changed++;pixels++;
+ }
+ return pixels?changed/pixels:1;
+}
+function exposureAdjustedDifference(a,b,threshold=24){
+ if(!a||!b||a.length!==b.length)return {distance:Infinity,ratio:1};
+ const shift=[0,0,0],pixels=a.length/3;
+ for(let i=0;i<a.length;i+=3){shift[0]+=b[i]-a[i];shift[1]+=b[i+1]-a[i+1];shift[2]+=b[i+2]-a[i+2];}
+ shift[0]/=pixels;shift[1]/=pixels;shift[2]/=pixels;
+ let total=0,changed=0;
+ for(let i=0;i<a.length;i+=3){
+  const difference=(Math.abs((b[i]-a[i])-shift[0])+Math.abs((b[i+1]-a[i+1])-shift[1])+Math.abs((b[i+2]-a[i+2])-shift[2]))/3;
+  total+=difference;if(difference>threshold)changed++;
+ }
+ return {distance:total/pixels,ratio:changed/pixels};
+}
+export function meaningfulFrameChange(a,b){
+ if(!a||!b||a.length!==b.length)return false;
+ const rawRatio=changedPixelRatio(a,b,20),adjusted=exposureAdjustedDifference(a,b,18);
+ // Require localized structural change after compensating for exposure. This
+ // catches a small replacement packet without reacting to global brightness.
+ return adjusted.distance>6||(rawRatio>.012&&adjusted.ratio>.012);
+}
+function resemblesBackground(background,frame){
+ // Uniform exposure changes and JPEG noise should remain "empty". A product
+ // creates a localized group of strongly changed pixels instead.
+ const rawDistance=frameDistance(background,frame),rawRatio=changedPixelRatio(background,frame),adjusted=exposureAdjustedDifference(background,frame);
+ return (rawDistance<26&&rawRatio<.015)||(rawDistance<45&&adjusted.distance<8&&adjusted.ratio<.015);
+}
 export function createCameraCycle(){
  let captured=null,previous=null,stableSince=0,changed=false,departed=false,background=null,backgroundSeenAt=0;
  return {
   reset(){background=null;captured=null;previous=null;stableSince=0;changed=false;departed=false;backgroundSeenAt=0;},
   setBackground(frame){background=frame;captured=null;previous=frame;stableSince=0;changed=false;departed=false;backgroundSeenAt=0;},
   capture(frame){captured=frame;previous=frame;stableSince=0;changed=false;departed=false;backgroundSeenAt=0;},
-  isBackground(frame){return Boolean(background&&frameDistance(background,frame)<12);},
+  isBackground(frame){return Boolean(background&&resemblesBackground(background,frame));},
   observe(frame,now){
-   const moving=frameDistance(previous,frame)>6;previous=frame;
+   // Compressed webcam and RTSP feeds change slightly even when the scene is
+   // still. Ignore that normal noise so checkout does not wait indefinitely.
+   const moving=frameDistance(previous,frame)>10;previous=frame;
    if(background){
-    const empty=frameDistance(background,frame)<12;
+    const empty=resemblesBackground(background,frame);
     if(empty){if(!backgroundSeenAt)backgroundSeenAt=now;if(now-backgroundSeenAt>=500)departed=true;if(moving)stableSince=now;return false;}
     if(backgroundSeenAt&&now-backgroundSeenAt>=500)departed=true;
     backgroundSeenAt=0;
     if(moving){stableSince=now;return false;}
     if(!stableSince)stableSince=now;
     if(captured&&frameDistance(captured,frame)>22)changed=true;
-    return now-stableSince>=800&&(!captured||departed);
+    return now-stableSince>=150&&(!captured||departed);
    }
    if(moving){stableSince=now;return false;}
    if(!stableSince)stableSince=now;
@@ -29,7 +65,7 @@ export function createCameraCycle(){
    // A sustained departure lets an identical-looking next packet be scanned.
    // Brief movement away and back does not rearm the camera.
    if(captured&&frameDistance(captured,frame)>22&&now-stableSince>=500)departed=true;
-   return now-stableSince>=800&&(!captured||(changed&&(departed||frameDistance(captured,frame)>18)));
+   return now-stableSince>=600&&(!captured||(changed&&(departed||frameDistance(captured,frame)>18)));
   },
  };
 }
