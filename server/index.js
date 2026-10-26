@@ -1,5 +1,6 @@
 import {accountControlsRouter} from './account-controls.js';
 import {aiRecognitionRouter} from './ai-recognition.js';
+import {aiAvailability,warmAiRuntime} from './ai-runtime.js';
 import {invoiceSearchRouter} from './invoice-search.js';
 import {storeReportsRouter} from './store-reports.js';
 import 'dotenv/config';
@@ -41,7 +42,7 @@ const publicUser=async user=>({name:user.name,email:user.email,role:user.role,ac
 const authResponse=async user=>({token:jwt.sign({id:user.id,role:user.role,version:user.tokenVersion||0},process.env.JWT_SECRET,{expiresIn:'8h'}),user:await publicUser(user)});
 let inventoryReady=false;
 const ready=(req,res,next)=>inventoryReady&&mongoose.connection.readyState===1?next():res.status(503).json({error:'MongoDB is unavailable. Configure MONGODB_URI and restart the server.'});
-app.get('/api/health',(req,res)=>res.status(inventoryReady?200:503).json({database:inventoryReady&&mongoose.connection.readyState===1?'connected':'initializing'}));
+app.get('/api/health',(req,res)=>res.status(inventoryReady?200:503).json({database:inventoryReady&&mongoose.connection.readyState===1?'connected':'initializing',ai:aiAvailability().loaded?'ready':'warming'}));
 app.use('/api',ready);
 // Initial setup is permanently closed. All further admins require an admin session.
 app.get('/api/auth/setup-status',(req,res)=>res.json({needsAdmin:false}));
@@ -256,5 +257,5 @@ const migration=await mongoose.startSession();try{await migration.withTransactio
  await Product.updateMany({},{$set:{stock:0}},{session:migration});
  await Setup.create([{_id:'store-inventory-v1'}],{session:migration});
 });}finally{await migration.endSession();}
-inventoryReady=true;console.log('MongoDB connected; store inventory ready.');}).catch(e=>console.error('MongoDB:',e.message));
+inventoryReady=true;console.log('MongoDB connected; store inventory ready.');if(process.env.AI_PREWARM!=='0')warmAiRuntime().then(()=>console.log('Local AI ready.')).catch(error=>console.error('AI warm-up:',error.message));}).catch(e=>console.error('MongoDB:',e.message));
 app.listen(process.env.PORT||4000,()=>console.log('Aspire billing server: http://localhost:'+(process.env.PORT||4000)));
