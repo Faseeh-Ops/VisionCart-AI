@@ -17,6 +17,10 @@ models/retail-detector/
 __pycache__/
 *.pyc
 
+# Local demo recordings and generated video-edit exports are not source files.
+/project recording*.mp4
+/video-edit/
+
 # Local management reports are not project source files.
 /docs/Aspire-AI-Billing-Weekly-Progress-Report.docx
 /scripts/generate-weekly-report.ps1
