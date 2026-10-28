@@ -15,6 +15,7 @@ import {starterProducts} from '../shared/catalog.js';
 import {dateRange,reportPage} from './reports.js';
 import {validatePhoto} from './profile-photo.js';
 import {rtspRouter} from './rtsp.js';
+import {hasInternalProductCode,normalizeProductBarcode,validPhysicalProductBarcode} from '../shared/product-barcode.js';
 const app=express(); app.use(express.json({limit:'800kb'}));
 const DEFAULT_STORE_ID='000000000000000000000001';
 const Store=mongoose.model('Store',new mongoose.Schema({name:{type:String,required:true,trim:true,maxLength:100},location:{type:String,required:true,trim:true,maxLength:150},code:{type:String,unique:true,required:true},active:{type:Boolean,default:true},cardPaymentsEnabled:{type:Boolean,default:true}},{timestamps:true}));
@@ -119,7 +120,7 @@ app.post('/api/profile/store-payment',async(req,res)=>{
  await StoreEvent.create({storeId:store.id,actorId:req.user.id,actorName:req.user.name,action:'Card payments '+(req.body.enabled?'enabled':'disabled'),details:`${req.user.name} ${req.body.enabled?'enabled':'disabled'} card payments for ${store.name}`});
  res.json(await publicUser(await User.findById(req.user.id)));
 });
-app.get('/api/products',async(req,res)=>{const store=await inventoryStore(req),fields='name barcode price category emoji discountPercent verified';const query=Product.find().select(fields).sort({name:1}).lean();if(req.user.role==='admin')query.select('+retailSources').slice('retailSources',1);res.json(await branchProducts(await query,store._id));});
+app.get('/api/products',async(req,res)=>{const store=await inventoryStore(req),fields='name barcode barcodeKind price category emoji discountPercent verified';const query=Product.find().select(fields).sort({name:1}).lean();if(req.user.role==='admin')query.select('+retailSources').slice('retailSources',1);res.json(await branchProducts(await query,store._id));});
 app.get('/api/inventory/lookup',async(req,res)=>{if(req.user.role!=='admin')return res.status(403).json({error:'Admin access required.'});const barcode=String(req.query.barcode||'').trim();if(!barcode||barcode.length>128)return res.status(400).json({error:'Enter a valid barcode.'});const store=await inventoryStore(req),product=await Product.findOne({barcode});res.json({product:product?(await branchProducts([product],store._id))[0]:null});});
 app.get('/api/inventory/snapshot',async(req,res)=>{const store=await inventoryStore(req),rows=await StoreInventory.find({storeId:store._id}).select('productId stock discountPercent').lean();res.json({storeId:store.id,items:rows.map(row=>[String(row.productId),row.stock,Number.isFinite(row.discountPercent)?row.discountPercent:null])});});
 app.post('/api/inventory/restock',async(req,res)=>{
@@ -179,7 +180,7 @@ const saveProduct=async(req,res)=>{
  const store=await inventoryStore(req);if(!store.active)return res.status(400).json({error:'Activate this store before editing inventory.'});
  const session=await mongoose.startSession();let product;
  try{await session.withTransaction(async()=>{
- const details={name:name.trim(),barcode:barcode.trim(),price,category,emoji};
+ const normalizedBarcode=normalizeProductBarcode(barcode),details={name:name.trim(),barcode:normalizedBarcode,barcodeKind:hasInternalProductCode({barcode:normalizedBarcode})?'internal':'physical',price,category,emoji};
  const before=await StoreInventory.findOne({storeId:store._id,productId:req.params.id||null}).session(session);
  const previousProduct=req.params.id?await Product.findById(req.params.id).session(session):null;
  if(req.params.id){product=await Product.findByIdAndUpdate(req.params.id,{...details,...(discountScope==='all'?{discountPercent}:{})},{new:true,runValidators:true,session});if(!product)throw Error('Product not found.');}
@@ -192,6 +193,21 @@ const saveProduct=async(req,res)=>{
 };
 app.post('/api/products/:id',saveProduct);
 app.post('/api/products',saveProduct);
+app.post('/api/products/:id/barcode',async(req,res)=>{
+ if(req.user.role!=='admin')return res.status(403).json({error:'Only administrators can assign product barcodes.'});
+ const barcode=normalizeProductBarcode(req.body.barcode);
+ if(!mongoose.isValidObjectId(req.params.id)||!validPhysicalProductBarcode(barcode))return res.status(400).json({error:'Scan a valid printed barcode containing 4 to 128 characters.'});
+ const store=await inventoryStore(req),session=await mongoose.startSession();let product;
+ try{await session.withTransaction(async()=>{
+   product=await Product.findById(req.params.id).session(session);
+   if(!product)throw Object.assign(Error('Product not found.'),{status:404});
+   const duplicate=await Product.findOne({_id:{$ne:product._id},barcode}).select('name').session(session);
+   if(duplicate)throw Object.assign(Error(`This barcode is already assigned to ${duplicate.name}.`),{status:409});
+   const previousBarcode=product.barcode,wasInternal=hasInternalProductCode(product);
+   product.barcode=barcode;product.barcodeKind='physical';await product.save({session});
+   await StoreEvent.create([{storeId:store.id,actorId:req.user.id,actorName:req.user.name,action:wasInternal?'Printed barcode assigned':'Printed barcode changed',productId:product._id,product:product.name,barcode,details:`Previous code ${previousBarcode} replaced with printed barcode ${barcode}. Product identity and inventory were preserved.`}],{session});
+ });res.json((await branchProducts([product],store._id))[0]);}finally{await session.endSession();}
+});
 app.post('/api/products/:id/discount',async(req,res)=>{
  if(req.user.role!=='admin')return res.status(403).json({error:'Only administrators can manage discounts.'});
  const discountPercent=req.body.discountPercent,storeId=String(req.body.storeId||'');
