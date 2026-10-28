@@ -14,10 +14,12 @@ os.environ['YOLO_CONFIG_DIR'] = str(ROOT / '.tools/ai-runtime')
 Path(os.environ['YOLO_CONFIG_DIR']).mkdir(parents=True, exist_ok=True)
 ImageModel = Processor = Detector = None
 Device = 'cpu'
+DetectorMode = 'off'
+DetectorName = None
 
 
 def load():
-    global ImageModel, Processor, Detector, Device
+    global ImageModel, Processor, Detector, Device, DetectorMode, DetectorName
     # Load camera-alignment dependencies during server warm-up so the first
     # checkout frame does not pay their import cost.
     import cv2
@@ -30,17 +32,32 @@ def load():
     ImageModel = AutoModel.from_pretrained(str(ROOT / 'models/siglip2'), local_files_only=True).eval().to(Device)
     # This service only uses image features; release the unused text tower.
     ImageModel.text_model = None
-    # The generic detector does not improve single-pack identity matching, so it
-    # is opt-in. This avoids adding a second CPU inference to every checkout scan.
-    if os.environ.get('AI_ENABLE_YOLO') == '1':
+    # The detector is a reversible experiment. "custom" uses the locally trained
+    # retail-product checkpoint; "generic" preserves the older diagnostic model.
+    legacy_enabled = os.environ.get('AI_ENABLE_YOLO') == '1'
+    DetectorMode = os.environ.get('AI_YOLO_MODE', 'generic' if legacy_enabled else 'off').strip().lower()
+    if DetectorMode not in {'off', 'custom', 'generic'}:
+        DetectorMode = 'off'
+    if DetectorMode != 'off':
         from ultralytics import YOLO
-        Detector = YOLO(str(ROOT / 'models/detector/yolo26n.pt'))
+        detector_path = (ROOT / ('models/retail-detector/candidate.pt'
+                                  if DetectorMode == 'custom' else 'models/detector/yolo26n.pt'))
+        if detector_path.exists():
+            Detector = YOLO(str(detector_path))
+            DetectorName = detector_path.name
+        else:
+            DetectorMode = 'off'
     # Exercise OpenCV's lazy initialization before advertising readiness.
     import numpy as np
     from PIL import Image
     rng = np.random.default_rng(1)
     warm_frame = Image.fromarray(rng.integers(70, 190, (240, 320, 3), dtype=np.uint8))
     background_change(warm_frame, warm_frame)
+    if Detector is not None:
+        Detector.predict(warm_frame, device=0 if Device == 'cuda' else 'cpu',
+                         conf=float(os.environ.get('AI_YOLO_CONFIDENCE', '.35')),
+                         imgsz=int(os.environ.get('AI_YOLO_IMAGE_SIZE', '512')),
+                         max_det=10, half=Device == 'cuda', verbose=False)
 
 
 def read_photo(photo):
@@ -112,6 +129,44 @@ def cosine(left, right):
     return sum(a * b for a, b in zip(left, right))
 
 
+def detect_products(image):
+    """Run one detector pass and return clipped, useful product boxes."""
+    if Detector is None:
+        return []
+    result = Detector.predict(
+        image,
+        device=0 if Device == 'cuda' else 'cpu',
+        conf=float(os.environ.get('AI_YOLO_CONFIDENCE', '.35')),
+        imgsz=int(os.environ.get('AI_YOLO_IMAGE_SIZE', '512')),
+        max_det=10,
+        half=Device == 'cuda',
+        verbose=False
+    )[0]
+    width, height = image.size
+    minimum_area = width * height * .003
+    detections = []
+    for item in result.boxes:
+        x1, y1, x2, y2 = item.xyxy[0].tolist()
+        x1, y1 = max(0, int(x1)), max(0, int(y1))
+        x2, y2 = min(width, int(x2)), min(height, int(y2))
+        if x2 <= x1 or y2 <= y1 or (x2-x1) * (y2-y1) < minimum_area:
+            continue
+        class_id = int(item.cls.item())
+        names = result.names
+        label = names.get(class_id, str(class_id)) if isinstance(names, dict) else names[class_id]
+        detections.append({'label': label, 'score': float(item.conf.item()),
+                           'xyxy': [x1, y1, x2, y2]})
+    return sorted(detections, key=lambda item: item['score'], reverse=True)
+
+
+def padded_crop(image, box, padding=.035):
+    width, height = image.size
+    x1, y1, x2, y2 = box
+    pad_x, pad_y = round((x2-x1) * padding), round((y2-y1) * padding)
+    return image.crop((max(0, x1-pad_x), max(0, y1-pad_y),
+                       min(width, x2+pad_x), min(height, y2+pad_y)))
+
+
 def encode(photo, mode='single', background_photo=None, purpose='query'):
     from scene_regions import product_regions, SceneError
     image = read_photo(photo)
@@ -119,7 +174,48 @@ def encode(photo, mode='single', background_photo=None, purpose='query'):
     if mode == 'multiple':
         if not background_photo:
             raise SceneError('Clear the counter and set the empty scan area before scanning multiple products.')
-        boxes = product_regions(image, background)
+        change = background_change(image, background)
+        width, height = image.size
+        margin_x, margin_y = round(width * .12), round(height * .12)
+        bg_width, bg_height = background.size
+        bg_margin_x, bg_margin_y = round(bg_width * .12), round(bg_height * .12)
+        scene_vectors = image_vectors([
+            image.crop((margin_x, margin_y, width-margin_x, height-margin_y)),
+            background.crop((bg_margin_x, bg_margin_y, bg_width-bg_margin_x, bg_height-bg_margin_y))
+        ])
+        background_similarity = cosine(scene_vectors[0], scene_vectors[1])
+        strong_background_limit = float(os.environ.get('AI_STRONG_BACKGROUND_SIMILARITY', '.82'))
+        if background_similarity >= strong_background_limit:
+            return {'regions': [], 'imageSize': list(image.size),
+                    'model': 'siglip2-base-patch16-224:image-v1',
+                    'localization': 'separated_counter_products',
+                    'detector': 'semantic_empty_counter', 'detections': [],
+                    'sceneChanged': False, 'backgroundSimilarity': background_similarity,
+                    'foregroundRatio': change['foregroundRatio'],
+                    'largestForegroundRatio': change['largestRatio'],
+                    'backgroundAligned': change['aligned']}
+        if change['changed'] is False:
+            return {'regions': [], 'imageSize': list(image.size),
+                    'model': 'siglip2-base-patch16-224:image-v1',
+                    'localization': 'separated_counter_products',
+                    'detector': 'aligned_background_components', 'detections': [],
+                    'sceneChanged': False, 'backgroundSimilarity': background_similarity,
+                    'foregroundRatio': change['foregroundRatio'],
+                    'largestForegroundRatio': change['largestRatio'],
+                    'backgroundAligned': change['aligned']}
+        detections = detect_products(image) if DetectorMode == 'custom' else []
+        edge_margin = max(3, round(min(image.size) * .008))
+        complete_detections = [item for item in detections if item['xyxy'][0] > edge_margin and item['xyxy'][1] > edge_margin and item['xyxy'][2] < image.size[0]-edge_margin and item['xyxy'][3] < image.size[1]-edge_margin]
+        skipped_edge_regions = len(detections)-len(complete_detections)
+        detections = complete_detections
+        boxes = [item['xyxy'] for item in detections]
+        localization = 'custom_yolo_product_regions'
+        detector_name = f'custom_yolo:{DetectorName}'
+        if not boxes:
+            boxes, region_details = product_regions(image, background, allow_partial=True, return_details=True)
+            skipped_edge_regions += region_details['skippedEdgeRegions']
+            localization = 'separated_counter_products'
+            detector_name = 'calibrated_background_components_fallback' if DetectorMode == 'custom' else 'calibrated_background_components'
         crops = [image.crop(box) for box in boxes]
         vectors = image_vectors(crops) if crops else []
         regions = []
@@ -130,7 +226,10 @@ def encode(photo, mode='single', background_photo=None, purpose='query'):
             preview.save(stream, format='JPEG', quality=75)
             regions.append({'box': box, 'embedding': vector, 'photo': 'data:image/jpeg;base64,' + base64.b64encode(stream.getvalue()).decode()})
         return {'regions': regions, 'imageSize': list(image.size), 'model': 'siglip2-base-patch16-224:image-v1',
-                'localization': 'separated_counter_products', 'detector': 'calibrated_background_components', 'detections': []}
+                'localization': localization, 'detector': detector_name, 'detections': detections,
+                'sceneChanged': True, 'backgroundSimilarity': background_similarity,
+                'foregroundRatio': change['foregroundRatio'], 'largestForegroundRatio': change['largestRatio'],
+                'backgroundAligned': change['aligned'], 'skippedEdgeRegions': skipped_edge_regions}
     if purpose == 'reference':
         return {'embedding': image_vectors([image])[0], 'model': 'siglip2-base-patch16-224:image-v1',
                 'localization': 'reference_image', 'detector': 'not_used', 'detections': []}
@@ -141,25 +240,32 @@ def encode(photo, mode='single', background_photo=None, purpose='query'):
                 'detector': 'aligned_background_comparison', 'detections': [], 'sceneChanged': False,
                 'foregroundRatio': change['foregroundRatio'], 'largestForegroundRatio': change['largestRatio'],
                 'backgroundAligned': change['aligned']}
-    boxes = []
-    if Detector is not None:
-        detection = Detector.predict(image, device=0 if Device == 'cuda' else 'cpu', conf=.25, imgsz=640, verbose=False)[0]
-        boxes = [{'label': detection.names[int(b.cls.item())], 'score': float(b.conf.item()), 'xyxy': b.xyxy[0].tolist()} for b in detection.boxes]
+    detections = detect_products(image) if Detector is not None else []
     width, height = image.size
     # DroidCam commonly letterboxes the feed. Use the center where checkout
     # products are placed and exclude borders/watermarks from recognition.
     margin_x, margin_y = round(width * .12), round(height * .12)
     focused = image.crop((margin_x, margin_y, width - margin_x, height - margin_y))
-    inputs = [focused]
+    query_images = []
+    # For the custom retail checkpoint, let SigLIP compare both the localized
+    # product and the established center view. Ranking uses the best score, so a
+    # missed or imperfect crop cannot remove the previous recognition signal.
+    if DetectorMode == 'custom' and detections:
+        query_images.append(padded_crop(image, detections[0]['xyxy']))
+    query_images.append(focused)
+    inputs = list(query_images)
     if background is not None:
         bg_width, bg_height = background.size
         bg_margin_x, bg_margin_y = round(bg_width * .12), round(bg_height * .12)
         inputs.append(background.crop((bg_margin_x, bg_margin_y, bg_width - bg_margin_x, bg_height - bg_margin_y)))
     vectors = image_vectors(inputs)
+    query_vectors = vectors[:len(query_images)]
     background_similarity = None
     if background is not None:
-        background_similarity = cosine(vectors[0], vectors[1])
-    return {'embedding': vectors[0], 'embeddings': [vectors[0]], 'model': 'siglip2-base-patch16-224:image-v1', 'localization': 'focused_product_view', 'detector': 'yolo26n' if Detector is not None else 'aligned_background_and_siglip', 'detections': boxes, 'sceneChanged': scene_changed, 'backgroundSimilarity': background_similarity,
+        background_similarity = cosine(query_vectors[-1], vectors[-1])
+    localization = 'custom_yolo_crop_with_focused_fallback' if DetectorMode == 'custom' and detections else 'focused_product_view'
+    detector_name = f'{DetectorMode}_yolo:{DetectorName}' if Detector is not None else 'aligned_background_and_siglip'
+    return {'embedding': query_vectors[0], 'embeddings': query_vectors, 'model': 'siglip2-base-patch16-224:image-v1', 'localization': localization, 'detector': detector_name, 'detections': detections, 'sceneChanged': scene_changed, 'backgroundSimilarity': background_similarity,
             'foregroundRatio': change['foregroundRatio'] if change else None,
             'largestForegroundRatio': change['largestRatio'] if change else None,
             'backgroundAligned': change['aligned'] if change else False}
