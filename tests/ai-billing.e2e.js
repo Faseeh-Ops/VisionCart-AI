@@ -216,7 +216,7 @@ test('calibrated camera skips empty frames and merges two identical packets with
  const panel=page.locator('.ai-billing');await panel.getByLabel('RTSP camera address').fill('rtsp://192.168.1.50:8554/test');
  await panel.getByRole('button',{name:'Connect RTSP camera',exact:true}).click();
  await expect(panel.getByRole('button',{name:'Recognize RTSP product',exact:true})).toBeEnabled();
- await panel.getByRole('button',{name:'Set empty scan area',exact:true}).click();
+ await panel.getByRole('button',{name:'Save empty counter',exact:true}).click();
  await expect(panel).toContainText('Scan area saved');
  await page.getByLabel('Scan automatically when the product is steady').check();
  await page.waitForTimeout(2400);expect(calls).toBe(0);
