@@ -2,6 +2,21 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createCameraCycle,meaningfulFrameChange} from '../src/camera-cycle.js';
 const frame=value=>Array(48).fill(value);
+const texturedFrame=()=>{
+ const output=[];
+ for(let y=0;y<24;y++)for(let x=0;x<32;x++){
+  const value=35+(x*19+y*13+x*y*3)%180;output.push(value,Math.min(255,value+17),Math.max(0,value-11));
+ }
+ return output;
+};
+const shiftedFrame=(source,dx,dy)=>{
+ const output=Array(source.length).fill(0);
+ for(let y=0;y<24;y++)for(let x=0;x<32;x++){
+  const fromX=Math.max(0,Math.min(31,x-dx)),fromY=Math.max(0,Math.min(23,y-dy));
+  for(let channel=0;channel<3;channel++)output[(y*32+x)*3+channel]=source[(fromY*32+fromX)*3+channel];
+ }
+ return output;
+};
 test('waits for stable view and does not repeat a stationary product',()=>{
  const gate=createCameraCycle();
  assert.equal(gate.observe(frame(80),1000),false);
@@ -75,6 +90,37 @@ test('reports when a calibrated camera has returned to its empty scan area',()=>
  assert.equal(gate.isBackground(frame(200)),true);
  assert.equal(gate.isBackground(frame(190)),true);
  assert.equal(gate.isBackground(frame(80)),false);
+});
+
+test('rearming preserves the original empty-counter reference',()=>{
+ const gate=createCameraCycle();gate.setBackground(frame(200));gate.capture(frame(80));
+ gate.rearm(frame(198));
+ assert.equal(gate.isBackground(frame(200)),true);
+ assert.equal(gate.isBackground(frame(80)),false);
+ assert.equal(gate.observe(frame(80),1000),false);
+ assert.equal(gate.observe(frame(80),1200),true);
+});
+
+test('a textured empty counter remains empty after a small camera shift',()=>{
+ const background=texturedFrame(),shifted=shiftedFrame(background,2,-1),product=[...shifted];
+ for(let y=8;y<16;y++)for(let x=12;x<20;x++){
+  const index=(y*32+x)*3;product[index]=235;product[index+1]=35;product[index+2]=70;
+ }
+ const gate=createCameraCycle();gate.setBackground(background);
+ assert.equal(gate.isBackground(shifted),true);
+ assert.equal(meaningfulFrameChange(background,shifted),false);
+ assert.equal(gate.isBackground(product),false);
+ assert.equal(meaningfulFrameChange(background,product),true);
+});
+
+test('a guarded rolling empty reference follows gradual camera drift',()=>{
+ const gate=createCameraCycle();let current=texturedFrame();gate.setBackground(current);
+ for(let shift=1;shift<=6;shift++){
+  const next=shiftedFrame(texturedFrame(),shift,0);
+  assert.equal(gate.isBackground(next),true);
+  gate.setBackground(next);current=next;
+ }
+ assert.equal(gate.isBackground(current),true);
 });
 
 test('camera exposure changes remain empty but a localized product does not',()=>{
