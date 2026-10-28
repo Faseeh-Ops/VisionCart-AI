@@ -21,11 +21,11 @@ A full-stack retail application for cashier-assisted product recognition, billin
 | Reporting | Invoice search, reprints and PDF through browser printing, store reports, sales filters, and CSV exports |
 | Catalog tools | Resumable retailer extraction, source provenance, duplicate-photo checks, controlled imports, and cached reference indexing |
 
-**Operational boundary:** AI matches require cashier confirmation. The current multi-product app mode uses calibrated foreground segmentation and needs visible gaps between items. The separately trained YOLO detector is an experimental candidate; the billing app does not activate it automatically. Hidden bottles, dense stacks, touching products, unknown SKUs, and visually similar pack sizes are not reliably resolved.
+**Operational boundary:** AI matches require cashier confirmation. Multi-product mode uses calibrated foreground segmentation by default and needs visible gaps between items. A separately trained YOLO detector can be enabled as a reversible local experiment, with foreground segmentation retained as the fallback. Hidden bottles, dense stacks, touching products, unknown SKUs, and visually similar pack sizes are not reliably resolved.
 
 ## Application screenshots
 
-Screenshots use fictional accounts, sample prices, and an isolated temporary database. The multi-product scene is a generated three-product fixture, not a physical-camera accuracy demonstration.
+Screenshots use fictional accounts, sample prices, and an isolated temporary database. The multi-product scene is a generated two-product fixture, not a physical-camera accuracy demonstration.
 
 ### Cashier checkout
 
@@ -97,11 +97,11 @@ The vision models have different responsibilities. A larger or newer model is no
 | --- | --- | --- |
 | Barcode / QR decoder | Reads an exact printed code and looks it up in inventory | Active; preferred when a readable code is present |
 | Generic YOLO26n | Proposes locations that may contain objects or product packages | Active for diagnostic boxes only; not trusted for SKU identity or billing |
-| Custom YOLO26n candidate | Detects the location of retail products using one `retail_product` class | Trained and evaluated locally; not enabled in billing |
+| Custom YOLO26n candidate | Detects the location of retail products using one `retail_product` class | Optional local runtime trial; disabled by default and never used for SKU identity |
 | SigLIP2 | Compares an image with enrolled inventory reference photos and ranks exact product candidates | Active; performs the current visual product matching |
 | Cashier confirmation | Selects the exact product and pack before it is billed | Required for every AI suggestion |
 
-In short, **YOLO finds where a product is; SigLIP2 suggests which product it is**. The generic YOLO checkpoint is loaded from `models/detector/yolo26n.pt`. The experimental custom checkpoint is stored locally as `models/retail-detector/candidate.pt`, but the runtime does not load it automatically.
+In short, **YOLO finds where a product is; SigLIP2 suggests which product it is**. The generic checkpoint is stored at `models/detector/yolo26n.pt`, and the experimental custom checkpoint is stored locally at `models/retail-detector/candidate.pt`. Both are disabled by default. Set `AI_YOLO_MODE=custom` only when evaluating the custom detector; `AI_YOLO_MODE=off` restores the established SigLIP and calibrated-counter path.
 
 The custom detector was trained as a one-class localization model. It does not contain separate classes such as Pepsi, Tiger biscuit, or Dalda ghee. Training thousands of SKU-specific YOLO classes would require substantial labelled data and frequent retraining as the catalogue changes. The selected architecture therefore keeps detection and identity separate: YOLO or calibrated counter segmentation creates regions, SigLIP2 compares them with the changing reference library, and the cashier resolves uncertainty.
 
@@ -130,12 +130,14 @@ flowchart LR
     API --> DB[(MongoDB replica set)]
     Browser -->|photo or camera frame| API
     API --> Worker[Persistent local Python worker]
-    Worker --> Single[Single product: full image]
-    Worker --> Multi[Multiple products: calibrated counter segmentation]
+    Worker --> Single[Single product: focused image]
+    Worker --> Multi[Multiple products: calibrated counter scene]
     Single --> Encoder[SigLIP 2 image embeddings]
-    Multi -->|product crops| Encoder
-    Worker --> YOLO[YOLO26n: single-image diagnostic boxes]
-    YOLO -.-> Diagnostics[Diagnostic metadata only]
+    Multi --> Segment[Foreground segmentation]
+    Segment -->|product crops| Encoder
+    Worker -. optional .-> YOLO[Custom YOLO product localization]
+    YOLO -->|candidate crops when enabled| Encoder
+    YOLO -. fallback .-> Segment
     Encoder --> Match[Inventory reference matching]
     Match --> API
     RTSP[RTSP camera] --> Bridge[FFmpeg bridge]
@@ -144,10 +146,11 @@ flowchart LR
     Review --> Invoice[Invoice and branch stock transaction]
     Invoice --> DB
     Training[Offline GPU training] -.-> Candidate[Fine-tuned retail YOLO candidate]
-    Candidate -.-> Evaluation[Synthetic evaluation: not active in billing]
+    Candidate -. local trial .-> YOLO
+    Candidate -.-> Evaluation[Synthetic and physical-camera evaluation]
 ```
 
-YOLO26n currently supplies diagnostic boxes for single-product requests; SigLIP 2 matches the full image in that mode. Multi-product requests use calibrated counter segmentation to produce crops for SigLIP 2. The separately fine-tuned YOLO candidate remains an offline experiment and is not connected to the billing detection path.
+With YOLO disabled, single-product requests use a focused camera crop and multi-product requests use calibrated counter segmentation before SigLIP matching. When the custom trial is enabled, YOLO proposes product crops once per stable scene; SigLIP still determines candidate identity, and the established focused/segmentation path remains available as a fallback. This keeps the experiment reversible and prevents YOLO detections from directly billing products.
 
 MongoDB owns prices, discounts, stock, and invoice records. AI returns candidate product identities; it does not determine prices. Each region prediction is user/store-bound, expires, and can be confirmed only once.
 
