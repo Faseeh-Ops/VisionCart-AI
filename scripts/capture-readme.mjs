@@ -105,35 +105,35 @@ try{
  await page.goto(base);await page.evaluate(account=>localStorage.setItem('asp-session',JSON.stringify(account)),admin);await page.goto(base+'/#/dashboard');await page.reload();
  await page.getByText('Connected workspace',{exact:true}).waitFor();const stockUnits=(await api('/products',admin.token)).reduce((sum,p)=>sum+p.stock,0);await page.locator('.stat').filter({hasText:'Products in stock'}).getByText(String(stockUnits),{exact:true}).waitFor();
  await snapshot(page,'dashboard');
- await page.getByRole('button',{name:'Store details',exact:true}).click();await page.getByRole('heading',{name:'Product stock: Gulberg Store'}).waitFor();await snapshot(page,'store-details');
+ await page.getByRole('button',{name:'Inventory management',exact:true}).click();await page.getByRole('heading',{name:'Product stock: Gulberg Store'}).waitFor();await snapshot(page,'store-details');
  await page.getByRole('button',{name:'Invoices',exact:true}).click();await page.locator('.invoice-history tbody tr').first().waitFor();await page.getByLabel('Invoice cashier',{exact:true}).selectOption({label:'Naveed Ahmed'});await page.getByRole('button',{name:'Search invoices',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.invoice-history .report-pagination')?.textContent.includes('14 invoices'));await snapshot(page,'invoice-search');
- await page.getByRole('button',{name:'Allocate stock between stores',exact:true}).click();const transfer=page.getByRole('dialog',{name:'Allocate stock between stores'});await transfer.getByLabel('To store',{exact:true}).selectOption(branch._id);await transfer.getByLabel('Product to allocate').selectOption(tiger._id);await transfer.getByLabel('Units to transfer').fill('50');await transfer.locator('.transfer-preview').waitFor();await snapshot(page,'stock-transfer');await page.getByRole('button',{name:'Close stock allocation'}).click();
+ await page.getByRole('button',{name:'Inventory management',exact:true}).click();await page.getByRole('button',{name:'Allocate stock between stores',exact:true}).click();const transfer=page.getByRole('dialog',{name:'Allocate stock between stores'});await transfer.getByLabel('To store',{exact:true}).selectOption(branch._id);await transfer.getByLabel('Product to allocate').selectOption(tiger._id);await transfer.getByLabel('Units to transfer').fill('50');await transfer.locator('.transfer-preview').waitFor();await snapshot(page,'stock-transfer');await page.getByRole('button',{name:'Close stock allocation'}).click();
  await page.evaluate(account=>localStorage.setItem('asp-session',JSON.stringify(account)),naveed);await page.reload();await page.getByRole('button',{name:'Billing station',exact:true}).click();await page.getByRole('heading',{name:'Current bill'}).waitFor();
  for(const p of [pepsi,coffee,tiger]){await page.getByRole('textbox',{name:'Barcode',exact:true}).fill(p.barcode);await page.getByRole('button',{name:'Scan',exact:true}).click();await page.locator('.cart-row').filter({hasText:p.name}).waitFor();}
  await page.getByRole('button',{name:'Increase '+pepsi.name,exact:true}).click();
  const dismiss=page.getByRole('button',{name:'Dismiss notification'});if(await dismiss.count())await dismiss.click();
  await snapshot(page,'billing');
  if(includeAi){
-  await page.getByLabel('Automatically recognize camera products').uncheck();
   const recognition=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ai/recognize'&&r.request().method()==='POST');
-  await page.getByLabel('Recognize product photo with AI').setInputFiles(referenceFiles[0]);
+  await page.getByLabel('Scan a product photo').setInputFiles(referenceFiles[0]);
   const prediction=await (await recognition).json();assert.equal(prediction.candidates[0].product._id,pepsi._id);
   await page.locator('.ai-candidate').first().waitFor();await snapshot(page,'ai-recognition');
   await page.getByRole('button',{name:'None of these products',exact:true}).click();
   await page.locator('.ai-candidate').first().waitFor({state:'detached'});
+  await page.getByText('Advanced scanning options',{exact:true}).click();
   await page.getByLabel('Multiple products on counter').check();
   const fixture=await page.evaluate(async sources=>{
-   const c=document.createElement('canvas');c.width=640;c.height=480;const ctx=c.getContext('2d');ctx.fillStyle='#333333';ctx.fillRect(0,0,640,480);
+   const c=document.createElement('canvas');c.width=640;c.height=480;const ctx=c.getContext('2d');ctx.fillStyle='#eeeeee';ctx.fillRect(0,0,640,480);
    const background=c.toDataURL('image/jpeg',.85).split(',')[1];
-   for(let i=0;i<sources.length;i++){const im=new Image();im.src=sources[i];await im.decode();const w=150,h=Math.min(260,150*im.naturalHeight/im.naturalWidth),x=25+i*220,y=110;ctx.fillStyle='#ffffff';ctx.fillRect(x,y,w,h);const scale=Math.min((w-8)/im.naturalWidth,(h-8)/im.naturalHeight),iw=im.naturalWidth*scale,ih=im.naturalHeight*scale;ctx.drawImage(im,x+(w-iw)/2,y+(h-ih)/2,iw,ih);}
+   for(let i=0;i<sources.length;i++){const im=new Image();im.src=sources[i];await im.decode();const w=130,h=220,x=55+i*195,y=115;ctx.fillStyle=i?'#303ca8':'#b32028';ctx.fillRect(x,y,w,h);const scale=Math.min((w-24)/im.naturalWidth,(h-24)/im.naturalHeight),iw=im.naturalWidth*scale,ih=im.naturalHeight*scale;ctx.drawImage(im,x+(w-iw)/2,y+(h-ih)/2,iw,ih);}
    return {background,scene:c.toDataURL('image/jpeg',.85).split(',')[1]};
-  },encodedReferences);
+  },encodedReferences.slice(0,2));
   await page.getByLabel('Upload empty counter photo').setInputFiles({name:'documentation-empty-counter.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.background,'base64')});
   const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ai/recognize'&&r.request().method()==='POST');
-  await page.getByLabel('Recognize product photo with AI').setInputFiles({name:'documentation-three-products.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.scene,'base64')});
-  const multi=await (await response).json();assert.equal(multi.items.length,3);assert.equal(multi.items[0].candidates[0].product._id,pepsi._id);
+  await page.getByLabel('Scan a product photo').setInputFiles({name:'documentation-three-products.jpg',mimeType:'image/jpeg',buffer:Buffer.from(fixture.scene,'base64')});
+  const multi=await (await response).json();assert.equal(multi.items.length,2);assert.equal(multi.items[0].candidates[0].product._id,pepsi._id);
   await page.getByRole('button',{name:'Confirm AI match '+pepsi.name,exact:true}).click();
-  await page.getByText('3 separate regions found. 2 left to review.',{exact:true}).waitFor();
+  await page.getByText('2 complete products found. 1 left to review.',{exact:true}).waitFor();
   const toast=page.getByRole('button',{name:'Dismiss notification'});if(await toast.count())await toast.click();
   await snapshot(page,'multi-product');
  }
