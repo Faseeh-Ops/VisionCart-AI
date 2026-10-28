@@ -7,6 +7,14 @@ export function productPhotoFromElement(element){
  for(const quality of [.88,.72,.5]){const photo=canvas.toDataURL('image/jpeg',quality);if(photo.length<340000)return photo;}
  throw Error('Choose a smaller product photo.');
 }
+export function barcodePhotoFromElement(element){
+ const width=element.videoWidth||element.naturalWidth,height=element.videoHeight||element.naturalHeight;
+ if(!width||!height)throw Error('Camera or image is not ready.');
+ const scale=Math.min(1,1600/Math.max(width,height)),canvas=document.createElement('canvas');
+ canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
+ canvas.getContext('2d').drawImage(element,0,0,canvas.width,canvas.height);
+ return canvas.toDataURL('image/jpeg',.92);
+}
 export async function prepareProductPhoto(file){
  if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>15*1024*1024)throw Error('Choose a JPEG, PNG or WebP product photo under 15 MB.');
  const url=URL.createObjectURL(file);
