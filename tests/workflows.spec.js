@@ -46,7 +46,7 @@ test('camera discovery, external preference and device disconnection',async({pag
   });
   await page.goto('/#/billing');
   const picker=page.getByLabel('Select camera');
-  await expect(picker.locator('option',{hasText:'Automatic — Logitech C130 USB Webcam'})).toHaveCount(1);
+  await expect(picker.locator('option',{hasText:'Logitech C130 USB Webcam'})).toHaveCount(1);
   await picker.selectOption('usb-logitech');
   await page.reload();
   await expect(picker).toHaveValue('usb-logitech');
@@ -67,6 +67,24 @@ test.afterAll(async()=>{
   if(!/^aspire_test_\d+$/.test(database))throw Error('Refusing to clean a non-test database');
   await mongoose.connect(`mongodb://127.0.0.1:27017/${database}?replicaSet=aspire-rs`);
   await mongoose.connection.dropDatabase();await mongoose.disconnect();
+});
+
+test('administrator can open barcode assignment for an existing product',async({page,request})=>{
+ const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ const admin=await (await request.post('/api/auth/login',{data:{email:'admin@test.local',password:'TestPassword123!',role:'admin'}})).json();
+ const headers={Authorization:`Bearer ${admin.token}`};
+ const product=await (await request.post('/api/products',{headers,data:{name:'Barcode assignment test product',barcode:`RETAIL-ASSIGN-${Date.now()}`,price:25,stock:3,category:'Test',discountPercent:0,discountScope:'all',storeId:'000000000000000000000001'}})).json();
+ await page.goto('/');await page.evaluate(session=>localStorage.setItem('asp-session',JSON.stringify(session)),admin);await page.goto('/#/products');await page.reload();
+ const card=page.locator(`.catalog-product[data-product-id="${product._id}"]`);await expect(card).toBeVisible();
+ await card.getByRole('button',{name:'Assign barcode'}).click();
+ await page.waitForTimeout(250);expect(errors).toEqual([]);
+ const dialog=page.getByRole('dialog',{name:'Assign printed barcode'});await expect(dialog).toBeVisible();
+ await expect(page.getByText('Current internal code: '+product.barcode)).toBeVisible();
+ await dialog.getByLabel('Printed barcode').fill('8961003674228');await dialog.getByRole('button',{name:'Assign barcode to product'}).click();
+ await expect(dialog).toHaveCount(0);await expect(card).toContainText('8961003674228');await expect(card).toContainText('3 in stock');
+ await expect(card.getByRole('button',{name:'Assign barcode'})).toBeVisible();await card.getByRole('button',{name:'Assign barcode'}).click();
+ await expect(page.getByRole('dialog',{name:'Change printed barcode'})).toBeVisible();
+ expect(errors).toEqual([]);
 });
 test('dashboard, new sale, notifications, corrections and invoice flow',async({page})=>{
   await page.goto('/');
@@ -339,9 +357,9 @@ test('hybrid AI scanner prioritizes an exact QR match without visual inference',
  let visualRequests=0;page.on('request',request=>{if(new URL(request.url()).pathname==='/api/ai/recognize')visualRequests++;});
  await page.goto('/');await page.evaluate(value=>localStorage.setItem('asp-session',JSON.stringify(value)),account);await page.goto('/#/billing');await page.reload();
  const qr=await qrPhoto(page,'ASPIRE-LAYS-52');
- await page.getByLabel('Recognize product photo with AI').setInputFiles({name:'lays-qr.png',mimeType:'image/png',buffer:qr});
+ await page.getByLabel('Scan a product photo').setInputFiles({name:'lays-qr.png',mimeType:'image/png',buffer:qr});
  await expect(page.locator('.cart-row')).toContainText("Lay's Classic Salted");
- await expect(page.locator('.ai-code-status')).toContainText('Exact QR match');
+ await expect(page.locator('.ai-code-status')).toContainText("Product detected: Lay's Classic Salted");
  expect(visualRequests).toBe(0);
 });
 
