@@ -106,9 +106,10 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
     // Camera motion can make a textured counter look different pixel-by-pixel.
     // Semantic similarity may suppress it only when OpenCV also finds no large
     // foreground. This keeps a real packet from being hidden by the counter.
-    const backgroundLimit=Number(process.env.AI_BACKGROUND_SIMILARITY||.88),foregroundLimit=Number(process.env.AI_BACKGROUND_MAX_FOREGROUND||.18),regionLimit=Number(process.env.AI_BACKGROUND_MAX_REGION||.05);
+    const backgroundLimit=Number(process.env.AI_BACKGROUND_SIMILARITY||.88),strongBackgroundLimit=Number(process.env.AI_STRONG_BACKGROUND_SIMILARITY||.82),foregroundLimit=Number(process.env.AI_BACKGROUND_MAX_FOREGROUND||.18),regionLimit=Number(process.env.AI_BACKGROUND_MAX_REGION||.05);
     const semanticEmpty=Number(encoded.backgroundSimilarity)>=backgroundLimit&&Number(encoded.foregroundRatio)<foregroundLimit&&Number(encoded.largestForegroundRatio)<regionLimit;
-    const sameBackground=backgroundPhoto&&(encoded.sceneChanged===false||semanticEmpty);
+    const strongSemanticEmpty=Number(encoded.backgroundSimilarity)>=strongBackgroundLimit;
+    const sameBackground=backgroundPhoto&&(encoded.sceneChanged===false||semanticEmpty||strongSemanticEmpty);
     if(req.body.cameraTriggered===true&&sameBackground)return res.json({requiresConfirmation:true,scoreType:'cosine_similarity_not_probability',mode:encoded.localization,detector:{name:encoded.detector,detections:encoded.detections},noMatch:true,noMatchReason:'aligned_empty_background',bestSimilarity:0,minimumSimilarity:minimum,backgroundSimilarity:encoded.backgroundSimilarity??1,foregroundRatio:encoded.foregroundRatio??0,largestForegroundRatio:encoded.largestForegroundRatio??0,backgroundAligned:Boolean(encoded.backgroundAligned)});
     const makeCandidates=async embedding=>{
     const queryEmbeddings=Array.isArray(embedding?.[0])?embedding:[embedding];
@@ -132,9 +133,10 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
       const prediction=await Prediction.create({user:req.user.id,storeId:store.id,candidates:candidates.map(c=>String(c.product._id)),expiresAt:new Date(Date.now()+5*60000)});
       return {recognitionId:prediction.id,candidates};
     };
-    const common={requiresConfirmation:true,scoreType:'cosine_similarity_not_probability',mode:encoded.localization,detector:{name:encoded.detector,detections:encoded.detections},notice:'Confirm each detected item and exact pack size. Overlapping or hidden items may be missed; similarity is not a confidence percentage.'};
+    const common={requiresConfirmation:true,scoreType:'cosine_similarity_not_probability',mode:encoded.localization,detector:{name:encoded.detector,detections:encoded.detections},backgroundSimilarity:encoded.backgroundSimilarity,foregroundRatio:encoded.foregroundRatio,largestForegroundRatio:encoded.largestForegroundRatio,skippedEdgeRegions:Number(encoded.skippedEdgeRegions)||0,notice:'Confirm each detected item and exact pack size. Overlapping or hidden items may be missed; similarity is not a confidence percentage.'};
     if(mode==='multiple'){
       if(!Array.isArray(encoded.regions)||encoded.regions.length>10)throw bad('AI returned invalid product regions.',503);
+      if(req.body.cameraTriggered===true&&encoded.regions.length===0&&!encoded.skippedEdgeRegions)return res.json({...common,noMatch:true,noMatchReason:'aligned_empty_background',foregroundRatio:encoded.foregroundRatio??0,largestForegroundRatio:encoded.largestForegroundRatio??0,backgroundAligned:Boolean(encoded.backgroundAligned)});
       const candidates=await Promise.all(encoded.regions.map(region=>makeCandidates(region.embedding)));
       const items=[];
       for(let i=0;i<candidates.length;i++)items.push({...await savePrediction(candidates[i]),box:encoded.regions[i].box,photo:encoded.regions[i].photo});
@@ -146,17 +148,18 @@ export function aiRecognitionRouter({Product,Store,Scan,branchProducts}){
   });
   router.post('/confirm',async(req,res)=>{
     if(req.user.role!=='cashier')throw bad('Cashier access required.',403);
-    const {recognitionId,productId}=req.body;
+    const {recognitionId,productId}=req.body,quantity=Number(req.body.quantity??1);
     if(!mongoose.isValidObjectId(recognitionId)||!mongoose.isValidObjectId(productId))throw bad('Choose a current product suggestion.');
+    if(!Number.isSafeInteger(quantity)||quantity<1||quantity>99)throw bad('Choose a quantity between 1 and 99.');
     const pending=await Prediction.findOne({_id:recognitionId,user:req.user.id,storeId:req.user.selectedStore,status:'pending',expiresAt:{$gt:new Date()},candidates:productId});
     if(!pending)throw bad('This suggestion expired, was already confirmed, or belongs to another store. Scan again.',409);
     if(!await Store.exists({_id:req.user.selectedStore,active:true}))throw bad('Select an active store.');
     const found=await Product.findOne({_id:productId,verified:true});if(!found)throw bad('Product is no longer available.',404);
-    const [product]=await branchProducts([found],req.user.selectedStore);if(product.stock<1)throw bad('This product is out of stock in your store.');
+    const [product]=await branchProducts([found],req.user.selectedStore);if(product.stock<quantity)throw bad(quantity===1?'This product is out of stock in your store.':'Your store does not have enough stock for that quantity.');
     const accepted=await Prediction.findOneAndUpdate({_id:pending._id,status:'pending'},{$set:{status:'confirmed'}},{new:true});
     if(!accepted)throw bad('Suggestion already confirmed. Scan again for another unit.',409);
     await Scan.create({barcode:product.barcode,format:'AI',verified:true,user:req.user.id,userName:req.user.name,storeId:req.user.selectedStore,productName:product.name});
-    res.json({product,format:'AI',verified:true});
+    res.json({product,quantity,format:'AI',verified:true});
   });
   router.post('/reject',async(req,res)=>{
     if(req.user.role!=='cashier')throw bad('Cashier access required.',403);
