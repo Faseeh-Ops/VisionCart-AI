@@ -7,7 +7,12 @@ import {createInterface} from 'node:readline';
 let child=null,starting=null,ready=false;
 const pending=new Map();
 const python=()=>process.env.AI_PYTHON_PATH||path.resolve(process.platform==='win32'?'.venv-ai/Scripts/python.exe':'.venv-ai/bin/python');
-export function aiAvailability(){const yoloAvailable=existsSync(path.resolve('models/detector/yolo26n.pt'));return {available:existsSync(python())&&existsSync(path.resolve('models/siglip2/model.safetensors')),loaded:ready,model:'SigLIP 2 product matching',yoloAvailable,mode:'Unified code and appearance matching with cashier confirmation'};}
+export function aiAvailability(){
+  const yoloMode=String(process.env.AI_YOLO_MODE||'off').toLowerCase();
+  const detectorPath=yoloMode==='custom'?'models/retail-detector/candidate.pt':'models/detector/yolo26n.pt';
+  const yoloAvailable=yoloMode!=='off'&&existsSync(path.resolve(detectorPath));
+  return {available:existsSync(python())&&existsSync(path.resolve('models/siglip2/model.safetensors')),loaded:ready,model:'SigLIP 2 product matching',yoloAvailable,yoloMode,detector:yoloAvailable?path.basename(detectorPath):null,mode:'Unified code and appearance matching with cashier confirmation'};
+}
 const unavailable=()=>Object.assign(Error('Local AI is unavailable. Install the AI environment and downloaded model files.'),{status:503});
 function start(){
   if(ready)return Promise.resolve();
