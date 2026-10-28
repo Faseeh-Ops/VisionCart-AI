@@ -38,15 +38,15 @@ export function watchCameraFrames(video,onProblem) {
 }
 
 
-export async function decodeBarcodePhoto(url) {
+export async function decodeBarcodePhoto(url,{fast=false}={}) {
   const image=new Image();image.src=url;await image.decode();
   const scale=Math.min(1,2400/Math.max(image.width,image.height));
   const base=document.createElement('canvas');base.width=Math.round(image.width*scale);base.height=Math.round(image.height*scale);
   base.getContext('2d').drawImage(image,0,0,base.width,base.height);
   const w=base.width,h=base.height;
-  const regions=[[0,0,w,h],[w*.12,h*.12,w*.76,h*.76],[0,0,w,h*.58],[0,h*.42,w,h*.58],[0,h*.18,w*.62,h*.64],[w*.38,h*.18,w*.62,h*.64],[w*.2,h*.3,w*.6,h*.4]];
+  const regions=fast?[[0,0,w,h],[w*.1,h*.1,w*.8,h*.8],[w*.15,h*.25,w*.7,h*.5]]:[[0,0,w,h],[w*.12,h*.12,w*.76,h*.76],[0,0,w,h*.58],[0,h*.42,w,h*.58],[0,h*.18,w*.62,h*.64],[w*.38,h*.18,w*.62,h*.64],[w*.2,h*.3,w*.6,h*.4]];
   const reader=createBarcodeReader();
-  for(const region of regions) for(const angle of [0,90,180,270]) {
+  for(const region of regions) for(const angle of fast?[0,90]:[0,90,180,270]) {
     const [x,y,rw,rh]=region;
     const canvas=document.createElement('canvas');canvas.width=Math.round(angle%180?rh:rw);canvas.height=Math.round(angle%180?rw:rh);
     const ctx=canvas.getContext('2d');ctx.translate(canvas.width/2,canvas.height/2);ctx.rotate(angle*Math.PI/180);
